@@ -12,7 +12,7 @@ export default function TeacherMonitor() {
   const [exam, setExam] = useState(null)
   const [students, setStudents] = useState([]) // live presence
   const [submissions, setSubmissions] = useState([])
-  const [log, setLog] = useState([])
+  const [log, setLog] = useState([]) // { msg, type: 'info'|'warn'|'note'|'ok' }
   const socketRef = useRef(null)
 
   useEffect(() => {
@@ -25,30 +25,35 @@ export default function TeacherMonitor() {
 
     socket.on('student_joined', ({ student_name }) => {
       setStudents(s => s.find(x => x.name === student_name)
-        ? s : [...s, { name: student_name, violations: 0, submitted: false }])
-      addLog(`${student_name} joined`)
+        ? s : [...s, { name: student_name, violations: 0, notes: 0, submitted: false }])
+      addLog(`${student_name} joined`, 'info')
     })
 
     socket.on('student_left', ({ student_name }) => {
-      addLog(`${student_name} disconnected`)
+      addLog(`${student_name} disconnected`, 'info')
     })
 
     socket.on('student_violation', ({ student_name, count }) => {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, violations: count } : x))
-      addLog(`⚠️ ${student_name} switched away (violation #${count})`)
+      addLog(`${student_name} switched away (violation #${count})`, 'warn')
+    })
+
+    socket.on('student_note', ({ student_name, action }) => {
+      setStudents(s => s.map(x => x.name === student_name ? { ...x, notes: (x.notes || 0) + 1 } : x))
+      addLog(`${student_name} ${action}`, 'note')
     })
 
     socket.on('submission', ({ student_name, violations }) => {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, submitted: true } : x))
       setSubmissions(prev => [...prev, { student_name, violations, submitted_at: Date.now() }])
-      addLog(`✅ ${student_name} submitted`)
+      addLog(`${student_name} submitted`, 'ok')
     })
 
     return () => socket.disconnect()
   }, [sessionId, examId])
 
-  function addLog(msg) {
-    setLog(l => [{ msg, time: new Date().toLocaleTimeString() }, ...l].slice(0, 50))
+  function addLog(msg, type = 'info') {
+    setLog(l => [{ msg, type, time: new Date().toLocaleTimeString() }, ...l].slice(0, 50))
   }
 
   const examUrl = `${window.location.origin}/student`
@@ -81,6 +86,9 @@ export default function TeacherMonitor() {
                     {s.violations > 0 && (
                       <span className="badge badge-yellow">⚠️ {s.violations} violation{s.violations > 1 ? 's' : ''}</span>
                     )}
+                    {s.notes > 0 && (
+                      <span className="badge badge-blue">📋 {s.notes} copy/paste</span>
+                    )}
                     {s.submitted
                       ? <span className="badge badge-green">Submitted</span>
                       : <span className="badge badge-blue">In Progress</span>
@@ -96,9 +104,14 @@ export default function TeacherMonitor() {
             <div className={styles.logBox}>
               {log.length === 0 && <p className={styles.empty}>No activity yet</p>}
               {log.map((l, i) => (
-                <div key={i} className={styles.logRow}>
+                <div key={i} className={`${styles.logRow} ${styles[`log_${l.type}`]}`}>
                   <span className={styles.logTime}>{l.time}</span>
-                  <span>{l.msg}</span>
+                  <span>
+                    {l.type === 'warn' && '⚠️ '}
+                    {l.type === 'note' && '📋 '}
+                    {l.type === 'ok'   && '✅ '}
+                    {l.msg}
+                  </span>
                 </div>
               ))}
             </div>

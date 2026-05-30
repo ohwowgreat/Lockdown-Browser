@@ -105,6 +105,10 @@ h2 {
 .logRow:last-child { border-bottom: none; }
 .logTime { color: var(--muted); flex-shrink: 0; }
 
+.log_warn  { background: var(--warning-light); }
+.log_note  { background: var(--accent-light); }
+.log_ok    { background: var(--success-light); }
+
 .submissionList { display: grid; gap: 1rem; }
 .submissionCard { display: flex; flex-direction: column; gap: 0.75rem; }
 .subHeader { display: flex; align-items: center; justify-content: space-between; }

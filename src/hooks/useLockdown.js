@@ -35,6 +35,16 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     }
   }, [sessionId, studentName, warn])
 
+  const recordNote = useCallback((action) => {
+    if (socketRef.current && sessionId && studentName) {
+      socketRef.current.emit('note', {
+        session_id: sessionId,
+        student_name: studentName,
+        action,
+      })
+    }
+  }, [sessionId, studentName])
+
   // Socket connection
   useEffect(() => {
     if (!enabled || !sessionId) return
@@ -96,6 +106,19 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [enabled])
 
+  // Track copy / paste (note only — not a violation)
+  useEffect(() => {
+    if (!enabled) return
+    function onCopy() { recordNote('copied text') }
+    function onPaste() { recordNote('pasted text') }
+    document.addEventListener('copy', onCopy)
+    document.addEventListener('paste', onPaste)
+    return () => {
+      document.removeEventListener('copy', onCopy)
+      document.removeEventListener('paste', onPaste)
+    }
+  }, [enabled, recordNote])
+
   // Block keyboard shortcuts
   useEffect(() => {
     if (!enabled) return
@@ -127,5 +150,6 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     isFullscreen,
     warningMsg,
     requestFullscreen,
+    recordNote,
   }
 }

@@ -159,6 +159,14 @@ io.on('connection', (socket) => {
     })
   })
 
+  socket.on('note', ({ session_id, student_name, action }) => {
+    io.to(`session:${session_id}`).emit('student_note', {
+      student_name,
+      action,
+      at: Date.now()
+    })
+  })
+
   socket.on('disconnect', () => {
     const { session_id, student_name } = socket.data
     if (session_id && student_name) {
