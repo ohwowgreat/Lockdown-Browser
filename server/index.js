@@ -23,9 +23,9 @@ db.exec(`
     time_limit INTEGER DEFAULT 0,
     code TEXT UNIQUE NOT NULL,
     active_session_id TEXT,
+    is_active INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch())
   );
-  -- add column if upgrading from older DB
   CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY);
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -52,10 +52,9 @@ db.exec(`
   );
 `)
 
-// Safe migration: add active_session_id if it doesn't exist yet
-try {
-  db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`)
-} catch (_) { /* column already exists */ }
+// Safe migrations for existing DBs
+try { db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`) } catch (_) {}
+try { db.exec(`ALTER TABLE exams ADD COLUMN is_active INTEGER DEFAULT 0`) } catch (_) {}
 
 const insertEvent = db.prepare(
   'INSERT INTO events (id, session_id, student_name, type, detail, at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -80,12 +79,14 @@ app.post('/api/exams', (req, res) => {
   const { title, questions, time_limit } = req.body
   const id = uuid()
   let code = generateCode()
-  // ensure unique
   while (db.prepare('SELECT id FROM exams WHERE code = ?').get(code)) {
     code = generateCode()
   }
-  db.prepare('INSERT INTO exams (id, title, questions, time_limit, code) VALUES (?, ?, ?, ?, ?)')
-    .run(id, title, JSON.stringify(questions), time_limit || 0, code)
+  // Auto-create a persistent session for this exam
+  const sessionId = uuid()
+  db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, id, Date.now())
+  db.prepare('INSERT INTO exams (id, title, questions, time_limit, code, active_session_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, title, JSON.stringify(questions), time_limit || 0, code, sessionId)
   res.json({ id, code })
 })
 
@@ -107,24 +108,26 @@ app.delete('/api/exams/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Toggle exam open/closed
+app.patch('/api/exams/:id/active', (req, res) => {
+  const { is_active } = req.body
+  db.prepare('UPDATE exams SET is_active = ? WHERE id = ?').run(is_active ? 1 : 0, req.params.id)
+  res.json({ ok: true })
+})
+
 // Lookup exam by code (student join)
 app.get('/api/exams/code/:code', (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE code = ?').get(req.params.code.toUpperCase())
   if (!exam) return res.status(404).json({ error: 'Invalid code' })
-  if (!exam.active_session_id) return res.status(400).json({ error: 'No active session. Ask your teacher to start the exam.' })
+  if (!exam.is_active) return res.status(400).json({ error: 'This exam is not open yet. Wait for your teacher to open it.' })
   res.json({ ...exam, questions: JSON.parse(exam.questions) })
 })
 
-// Sessions
-app.post('/api/sessions', (req, res) => {
-  const { exam_id } = req.body
-  const id = uuid()
-  db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)')
-    .run(id, exam_id, Date.now())
-  // Store as the active session so students can find it via exam code
-  db.prepare('UPDATE exams SET active_session_id = ? WHERE id = ?')
-    .run(id, exam_id)
-  res.json({ id })
+// Sessions (kept for direct lookups; sessions are now auto-created with exams)
+app.get('/api/sessions/:id', (req, res) => {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id)
+  if (!session) return res.status(404).json({ error: 'Not found' })
+  res.json(session)
 })
 
 app.get('/api/sessions/:id/submissions', (req, res) => {
@@ -140,9 +143,9 @@ app.post('/api/submissions', (req, res) => {
   db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations) VALUES (?, ?, ?, ?, ?)')
     .run(id, session_id, student_name, JSON.stringify(answers), violations || 0)
   logEvent(session_id, student_name, 'submitted')
-  // notify teacher room
+  // notify teacher room — include answers so monitor doesn't need a page refresh
   io.to(`session:${session_id}`).emit('submission', {
-    id, student_name, violations, submitted_at: Date.now()
+    id, student_name, violations, answers, submitted_at: Date.now()
   })
   res.json({ id })
 })

@@ -62,7 +62,7 @@
 
 .examTop {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
 }
@@ -70,6 +70,13 @@
 .examTop h2 {
   font-size: 1rem;
   font-weight: 600;
+}
+
+.examTopRight {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
 }
 
 .meta { font-size: 0.8125rem; color: var(--muted); }

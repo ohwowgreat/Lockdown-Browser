@@ -133,6 +133,9 @@ export default function TeacherMonitor() {
   const [log, setLog] = useState([])
   const socketRef = useRef(null)
 
+  // Derive sessionId from exam rather than URL param if not provided
+  const resolvedSessionId = sessionId || exam?.active_session_id
+
   useEffect(() => {
     fetch(`/api/exams/${examId}`).then(r => r.json()).then(setExam)
     fetch(`/api/sessions/${sessionId}/submissions`).then(r => r.json()).then(setSubmissions)
@@ -196,7 +199,9 @@ export default function TeacherMonitor() {
         <h1>{exam?.title ?? 'Loading...'}</h1>
         <div className={styles.sessionInfo}>
           <span className={styles.code}>{exam?.code}</span>
-          <span className={styles.sessionLabel}>Active Session</span>
+          <span className={`${styles.sessionLabel} ${exam?.is_active ? styles.sessionOpen : styles.sessionClosed}`}>
+            {exam?.is_active ? '● Open' : '○ Closed'}
+          </span>
         </div>
       </header>
 

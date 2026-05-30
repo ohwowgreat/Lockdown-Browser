@@ -19,14 +19,18 @@ export default function TeacherDashboard() {
     setExams(exams.filter(e => e.id !== id))
   }
 
-  async function startSession(examId) {
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
+  async function toggleActive(exam) {
+    const next = !exam.is_active
+    await fetch(`/api/exams/${exam.id}/active`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ exam_id: examId })
+      body: JSON.stringify({ is_active: next })
     })
-    const { id: sessionId } = await res.json()
-    nav(`/teacher/exam/${examId}/monitor?session=${sessionId}`)
+    setExams(exams.map(e => e.id === exam.id ? { ...e, is_active: next } : e))
+  }
+
+  function viewResults(exam) {
+    nav(`/teacher/exam/${exam.id}/monitor?session=${exam.active_session_id}`)
   }
 
   return (
@@ -60,15 +64,26 @@ export default function TeacherDashboard() {
             <div key={exam.id} className={`card ${styles.examCard}`}>
               <div className={styles.examTop}>
                 <h2>{exam.title}</h2>
-                <span className="badge badge-blue">{exam.code}</span>
+                <div className={styles.examTopRight}>
+                  <span className={`badge ${exam.is_active ? 'badge-green' : 'badge-yellow'}`}>
+                    {exam.is_active ? '● Open' : '○ Closed'}
+                  </span>
+                  <span className="badge badge-blue">{exam.code}</span>
+                </div>
               </div>
               <p className={styles.meta}>
                 {exam.questions.length} question{exam.questions.length !== 1 ? 's' : ''}
                 {exam.time_limit > 0 ? ` · ${exam.time_limit} min` : ' · No time limit'}
               </p>
               <div className={styles.examActions}>
-                <button className="btn-primary" onClick={() => startSession(exam.id)}>
-                  Start Session
+                <button
+                  className={exam.is_active ? 'btn-danger' : 'btn-primary'}
+                  onClick={() => toggleActive(exam)}
+                >
+                  {exam.is_active ? 'Close Exam' : 'Open Exam'}
+                </button>
+                <button className="btn-ghost" onClick={() => viewResults(exam)}>
+                  View Results
                 </button>
                 <button className="btn-ghost" onClick={() => nav(`/teacher/exam/${exam.id}/edit`)}>
                   Edit
