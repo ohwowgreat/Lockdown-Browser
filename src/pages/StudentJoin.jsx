@@ -15,7 +15,12 @@ export default function StudentJoin() {
     setError('')
     try {
       const res = await fetch(`/api/exams/code/${code.trim()}`)
-      if (!res.ok) { setError('Invalid exam code. Check with your teacher.'); setLoading(false); return }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error || 'Invalid exam code. Check with your teacher.')
+        setLoading(false)
+        return
+      }
       const exam = await res.json()
       // Store in session storage so StudentExam can pick it up
       sessionStorage.setItem('exam', JSON.stringify(exam))

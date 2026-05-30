@@ -23,19 +23,11 @@ export default function StudentExam() {
     setExam(parsed)
     setStudentName(n)
 
-    // Create or reuse session
-    if (s) {
-      setSessionId(s)
-    } else {
-      fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exam_id: parsed.id })
-      }).then(r => r.json()).then(({ id }) => {
-        setSessionId(id)
-        sessionStorage.setItem('sessionId', id)
-      })
-    }
+    // Use the teacher's active session — do NOT create a new one
+    const activeSession = parsed.active_session_id
+    if (!activeSession) { nav('/student'); return }
+    setSessionId(activeSession)
+    sessionStorage.setItem('sessionId', activeSession)
 
     // Timer
     if (parsed.time_limit > 0) {

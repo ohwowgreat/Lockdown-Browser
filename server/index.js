@@ -22,8 +22,12 @@ db.exec(`
     questions TEXT NOT NULL,
     time_limit INTEGER DEFAULT 0,
     code TEXT UNIQUE NOT NULL,
+    active_session_id TEXT,
     created_at INTEGER DEFAULT (unixepoch())
   );
+  -- add column if upgrading from older DB
+  CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY);
+
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     exam_id TEXT NOT NULL,
@@ -39,6 +43,11 @@ db.exec(`
     submitted_at INTEGER DEFAULT (unixepoch())
   );
 `)
+
+// Safe migration: add active_session_id if it doesn't exist yet
+try {
+  db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`)
+} catch (_) { /* column already exists */ }
 
 function generateCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -87,6 +96,7 @@ app.delete('/api/exams/:id', (req, res) => {
 app.get('/api/exams/code/:code', (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE code = ?').get(req.params.code.toUpperCase())
   if (!exam) return res.status(404).json({ error: 'Invalid code' })
+  if (!exam.active_session_id) return res.status(400).json({ error: 'No active session. Ask your teacher to start the exam.' })
   res.json({ ...exam, questions: JSON.parse(exam.questions) })
 })
 
@@ -96,6 +106,9 @@ app.post('/api/sessions', (req, res) => {
   const id = uuid()
   db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)')
     .run(id, exam_id, Date.now())
+  // Store as the active session so students can find it via exam code
+  db.prepare('UPDATE exams SET active_session_id = ? WHERE id = ?')
+    .run(id, exam_id)
   res.json({ id })
 })
 
