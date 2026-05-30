@@ -1,0 +1,115 @@
+.wrap { min-height: 100vh; }
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.header h1 {
+  flex: 1;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.sessionInfo { display: flex; align-items: center; gap: 0.75rem; }
+
+.code {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+
+.sessionLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--success-light);
+  color: var(--success);
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+}
+
+.main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.joinBox {
+  background: var(--accent-light);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+h2 {
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.studentList, .logBox {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 200px;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.empty { padding: 2rem; text-align: center; color: var(--muted); font-size: 0.875rem; }
+
+.studentRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.studentRow:last-child { border-bottom: none; }
+
+.studentName { font-weight: 500; font-size: 0.875rem; }
+.studentBadges { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+
+.logRow {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+.logRow:last-child { border-bottom: none; }
+.logTime { color: var(--muted); flex-shrink: 0; }
+
+.submissionList { display: grid; gap: 1rem; }
+.submissionCard { display: flex; flex-direction: column; gap: 0.75rem; }
+.subHeader { display: flex; align-items: center; justify-content: space-between; }
+.subMeta { display: flex; align-items: center; gap: 0.5rem; }
+.answers { display: grid; gap: 0.5rem; }
+.answerRow { display: flex; flex-direction: column; gap: 0.125rem; background: var(--bg); border-radius: 6px; padding: 0.5rem 0.75rem; }
+.answerQ { font-size: 0.8125rem; color: var(--muted); }
+.answerA { font-size: 0.875rem; font-weight: 500; }

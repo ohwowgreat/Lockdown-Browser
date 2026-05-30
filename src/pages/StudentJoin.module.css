@@ -1,0 +1,67 @@
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.logo {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -0.03em;
+}
+
+.card h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin-top: -0.25rem;
+}
+
+.sub { color: var(--muted); font-size: 0.875rem; margin-top: -0.5rem; }
+
+.field { display: flex; flex-direction: column; gap: 0.375rem; }
+
+.codeInput {
+  font-size: 1.5rem !important;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.error {
+  font-size: 0.8125rem;
+  color: var(--danger);
+  background: var(--danger-light);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+}
+
+.joinBtn {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1rem;
+  margin-top: 0.25rem;
+}
+
+.warning {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}

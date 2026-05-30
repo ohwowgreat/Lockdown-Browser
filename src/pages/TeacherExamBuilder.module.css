@@ -1,0 +1,72 @@
+.wrap { min-height: 100vh; }
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header h1 {
+  flex: 1;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.qHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.qNum {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--accent);
+  min-width: 2rem;
+}
+
+.qActions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.options { margin-top: 0.75rem; }
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+}
+
+.optionRow input[type="radio"] {
+  width: auto;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.375rem;
+}

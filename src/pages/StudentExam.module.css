@@ -1,0 +1,147 @@
+.wrap {
+  min-height: 100vh;
+  background: var(--bg);
+  position: relative;
+}
+
+.warningToast {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--warning);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 0.9rem;
+  z-index: 999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.fsBar {
+  background: var(--danger-light);
+  border-bottom: 1px solid #fecaca;
+  padding: 0.5rem 1.5rem;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  color: var(--danger);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.examTitle {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.progress {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.timer {
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.timerRed { color: var(--danger); }
+
+.main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.qCard {
+  margin-bottom: 1.25rem;
+}
+
+.qNum {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin-bottom: 0.375rem;
+}
+
+.qText {
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.optLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+  font-size: 0.9375rem;
+  user-select: none;
+}
+
+.optLabel:hover { border-color: var(--accent); background: var(--accent-light); }
+.optLabel.selected { border-color: var(--accent); background: var(--accent-light); font-weight: 500; }
+
+.optLabel input[type="radio"] {
+  width: auto;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.shortInput {
+  margin-top: 0;
+}
+
+.essayInput {
+  resize: vertical;
+}
+
+.submitRow {
+  display: flex;
+  justify-content: center;
+  padding: 2rem 0 3rem;
+}
+
+.submitBtn {
+  padding: 0.875rem 2.5rem;
+  font-size: 1rem;
+}
