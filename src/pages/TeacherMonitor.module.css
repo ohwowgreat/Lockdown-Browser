@@ -109,11 +109,159 @@ h2 {
 .log_note  { background: var(--accent-light); }
 .log_ok    { background: var(--success-light); }
 
+/* ---- Submissions ---- */
+
+.subHeader2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.exportBtn {
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.875rem;
+  text-decoration: none;
+  display: inline-block;
+  border-radius: var(--radius);
+}
+
 .submissionList { display: grid; gap: 1rem; }
-.submissionCard { display: flex; flex-direction: column; gap: 0.75rem; }
-.subHeader { display: flex; align-items: center; justify-content: space-between; }
-.subMeta { display: flex; align-items: center; gap: 0.5rem; }
-.answers { display: grid; gap: 0.5rem; }
-.answerRow { display: flex; flex-direction: column; gap: 0.125rem; background: var(--bg); border-radius: 6px; padding: 0.5rem 0.75rem; }
-.answerQ { font-size: 0.8125rem; color: var(--muted); }
-.answerA { font-size: 0.875rem; font-weight: 500; }
+
+.submissionCard { padding: 0; overflow: hidden; }
+
+/* Summary toggle row */
+.subToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  text-align: left;
+  gap: 1rem;
+  border-radius: var(--radius);
+}
+
+.subToggle:hover { background: var(--bg); }
+
+.subLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.subLeft strong { font-size: 0.9375rem; }
+
+.subBadges { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+
+.subChevron {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* Expanded detail */
+.subDetail {
+  border-top: 1px solid var(--border);
+  padding: 1.25rem;
+}
+
+.subSection {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+/* Answer rows */
+.answers { display: grid; gap: 0.625rem; }
+
+.answerRow {
+  border-radius: 6px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.answerCorrect { border-color: #bbf7d0; background: var(--success-light); }
+.answerWrong   { border-color: #fecaca; background: var(--danger-light); }
+
+.answerMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.answerQNum {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.answerType {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.answerMark     { font-size: 0.75rem; font-weight: 600; color: var(--success); }
+.answerMarkWrong { font-size: 0.75rem; font-weight: 600; color: var(--danger); }
+
+.answerQ {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.answerA {
+  font-size: 0.875rem;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.noAnswer { color: var(--muted); font-style: italic; }
+
+/* MC options inside answer row */
+.mcOptions { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.mcOpt {
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: var(--muted);
+}
+
+.mcCorrect { color: var(--success); font-weight: 600; }
+.mcChosen  { color: var(--danger);  font-weight: 600; background: var(--danger-light); border-radius: 4px; }
+.mcHint    { font-weight: 400; font-size: 0.75rem; color: var(--muted); }
+
+/* Event log inside submission */
+.eventList {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.eventRow {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.4rem 0.875rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+.eventRow:last-child { border-bottom: none; }
+
+.eventTime { color: var(--muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.eventMsg  { color: var(--text); }
+
+.event_violation   { background: var(--warning-light); }
+.event_note        { background: var(--accent-light); }
+.event_submitted   { background: var(--success-light); }

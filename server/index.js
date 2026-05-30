@@ -42,12 +42,27 @@ db.exec(`
     violations INTEGER DEFAULT 0,
     submitted_at INTEGER DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    student_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    detail TEXT,
+    at INTEGER NOT NULL
+  );
 `)
 
 // Safe migration: add active_session_id if it doesn't exist yet
 try {
   db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`)
 } catch (_) { /* column already exists */ }
+
+const insertEvent = db.prepare(
+  'INSERT INTO events (id, session_id, student_name, type, detail, at) VALUES (?, ?, ?, ?, ?, ?)'
+)
+function logEvent(session_id, student_name, type, detail = null) {
+  insertEvent.run(uuid(), session_id, student_name, type, detail, Date.now())
+}
 
 function generateCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -124,11 +139,85 @@ app.post('/api/submissions', (req, res) => {
   const id = uuid()
   db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations) VALUES (?, ?, ?, ?, ?)')
     .run(id, session_id, student_name, JSON.stringify(answers), violations || 0)
+  logEvent(session_id, student_name, 'submitted')
   // notify teacher room
   io.to(`session:${session_id}`).emit('submission', {
     id, student_name, violations, submitted_at: Date.now()
   })
   res.json({ id })
+})
+
+// Events log for a session
+app.get('/api/sessions/:id/events', (req, res) => {
+  const events = db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY at ASC')
+    .all(req.params.id)
+  res.json(events)
+})
+
+// CSV export for a session
+app.get('/api/sessions/:id/export.csv', (req, res) => {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id)
+  if (!session) return res.status(404).send('Not found')
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(session.exam_id)
+  const questions = JSON.parse(exam.questions)
+  const subs = db.prepare('SELECT * FROM submissions WHERE session_id = ? ORDER BY submitted_at ASC')
+    .all(req.params.id)
+  const events = db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY at ASC')
+    .all(req.params.id)
+
+  // Build per-student event summary
+  const eventsByStudent = {}
+  for (const e of events) {
+    if (!eventsByStudent[e.student_name]) eventsByStudent[e.student_name] = []
+    eventsByStudent[e.student_name].push(e)
+  }
+
+  const mcQuestions = questions.filter(q => q.type === 'multiple_choice')
+
+  // Header row
+  const headers = [
+    'Student Name',
+    'Submitted At',
+    `Score (MC ${mcQuestions.length} questions)`,
+    'Violations',
+    'Copy/Paste Events',
+    ...questions.map((q, i) => `Q${i + 1}: ${q.text.replace(/"/g, '""')}`),
+    'Action Log'
+  ]
+
+  const rows = subs.map(s => {
+    const answers = JSON.parse(s.answers)
+    const mcCorrect = mcQuestions.filter(q => answers[q.id] === q.correct).length
+    const studentEvents = eventsByStudent[s.student_name] || []
+    const copyPasteCount = studentEvents.filter(e => e.type === 'note').length
+    const actionLog = studentEvents
+      .map(e => `[${new Date(e.at).toLocaleTimeString()}] ${e.type}${e.detail ? ': ' + e.detail : ''}`)
+      .join(' | ')
+
+    return [
+      s.student_name,
+      new Date(s.submitted_at * 1000).toLocaleString(),
+      mcQuestions.length > 0 ? `${mcCorrect}/${mcQuestions.length}` : 'N/A',
+      s.violations,
+      copyPasteCount,
+      ...questions.map(q => {
+        const ans = answers[q.id]
+        if (q.type === 'multiple_choice') {
+          if (ans === undefined) return '(no answer)'
+          return `${q.options[ans]} ${ans === q.correct ? '[CORRECT]' : '[WRONG]'}`
+        }
+        return ans || '(no answer)'
+      }),
+      actionLog
+    ]
+  })
+
+  const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const csv = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n')
+
+  res.setHeader('Content-Type', 'text/csv')
+  res.setHeader('Content-Disposition', `attachment; filename="${exam.title.replace(/[^a-z0-9]/gi, '_')}_results.csv"`)
+  res.send(csv)
 })
 
 // --- Socket.IO ---
@@ -144,6 +233,7 @@ io.on('connection', (socket) => {
     socket.join(`session:${session_id}`)
     socket.data.session_id = session_id
     socket.data.student_name = student_name
+    logEvent(session_id, student_name, 'joined')
     io.to(`session:${session_id}`).emit('student_joined', {
       id: socket.id,
       student_name,
@@ -152,6 +242,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('violation', ({ session_id, student_name, count }) => {
+    logEvent(session_id, student_name, 'violation', `#${count} – switched away from exam`)
     io.to(`session:${session_id}`).emit('student_violation', {
       student_name,
       count,
@@ -160,6 +251,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('note', ({ session_id, student_name, action }) => {
+    logEvent(session_id, student_name, 'note', action)
     io.to(`session:${session_id}`).emit('student_note', {
       student_name,
       action,
@@ -170,6 +262,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const { session_id, student_name } = socket.data
     if (session_id && student_name) {
+      logEvent(session_id, student_name, 'disconnected')
       io.to(`session:${session_id}`).emit('student_left', {
         student_name,
         at: Date.now()
