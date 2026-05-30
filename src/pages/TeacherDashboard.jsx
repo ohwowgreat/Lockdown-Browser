@@ -21,16 +21,22 @@ export default function TeacherDashboard() {
 
   async function toggleActive(exam) {
     const next = !exam.is_active
-    await fetch(`/api/exams/${exam.id}/active`, {
+    const res = await fetch(`/api/exams/${exam.id}/active`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: next })
     })
-    setExams(exams.map(e => e.id === exam.id ? { ...e, is_active: next } : e))
+    const data = await res.json()
+    // Update local state — also capture session_id if it was just created for a legacy exam
+    setExams(exams.map(e =>
+      e.id === exam.id
+        ? { ...e, is_active: next, active_session_id: data.session_id || e.active_session_id }
+        : e
+    ))
   }
 
   function viewResults(exam) {
-    nav(`/teacher/exam/${exam.id}/monitor?session=${exam.active_session_id}`)
+    nav(`/teacher/exam/${exam.id}/monitor?session=${exam.active_session_id || ''}`)
   }
 
   return (

@@ -108,11 +108,22 @@ app.delete('/api/exams/:id', (req, res) => {
   res.json({ ok: true })
 })
 
-// Toggle exam open/closed
+// Toggle exam open/closed — also ensures a session exists for legacy exams
 app.patch('/api/exams/:id/active', (req, res) => {
   const { is_active } = req.body
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(req.params.id)
+  if (!exam) return res.status(404).json({ error: 'Not found' })
+
+  let sessionId = exam.active_session_id
+  if (!sessionId) {
+    // Legacy exam created before auto-session — create one now
+    sessionId = uuid()
+    db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, req.params.id, Date.now())
+    db.prepare('UPDATE exams SET active_session_id = ? WHERE id = ?').run(sessionId, req.params.id)
+  }
+
   db.prepare('UPDATE exams SET is_active = ? WHERE id = ?').run(is_active ? 1 : 0, req.params.id)
-  res.json({ ok: true })
+  res.json({ ok: true, session_id: sessionId })
 })
 
 // Lookup exam by code (student join)

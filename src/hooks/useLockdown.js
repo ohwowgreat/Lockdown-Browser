@@ -45,13 +45,22 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     }
   }, [sessionId, studentName])
 
-  // Socket connection
+  // Socket connection — re-emit student_join on every (re)connect so
+  // the server always knows which session this socket belongs to
   useEffect(() => {
     if (!enabled || !sessionId) return
     const socket = io()
     socketRef.current = socket
-    socket.emit('student_join', { session_id: sessionId, student_name: studentName })
-    return () => socket.disconnect()
+
+    function join() {
+      socket.emit('student_join', { session_id: sessionId, student_name: studentName })
+    }
+
+    socket.on('connect', join)          // fires on first connect AND every reconnect
+    return () => {
+      socket.off('connect', join)
+      socket.disconnect()
+    }
   }, [enabled, sessionId, studentName])
 
   // Request fullscreen

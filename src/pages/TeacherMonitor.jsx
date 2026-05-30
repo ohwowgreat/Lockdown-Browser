@@ -124,49 +124,76 @@ export default function TeacherMonitor() {
   const nav = useNavigate()
   const { id: examId } = useParams()
   const [params] = useSearchParams()
-  const sessionId = params.get('session')
 
   const [exam, setExam] = useState(null)
+  const [sid, setSid] = useState(null)          // resolved session id
   const [students, setStudents] = useState([])
   const [submissions, setSubmissions] = useState([])
   const [events, setEvents] = useState([])
   const [log, setLog] = useState([])
   const socketRef = useRef(null)
+  const sidRef = useRef(null)                   // always-current sid for socket callbacks
 
-  // Derive sessionId from exam rather than URL param if not provided
-  const resolvedSessionId = sessionId || exam?.active_session_id
-
+  // Phase 1 — load exam, derive real session id
   useEffect(() => {
-    fetch(`/api/exams/${examId}`).then(r => r.json()).then(setExam)
-    fetch(`/api/sessions/${sessionId}/submissions`).then(r => r.json()).then(setSubmissions)
-    fetch(`/api/sessions/${sessionId}/events`).then(r => r.json()).then(setEvents)
+    fetch(`/api/exams/${examId}`)
+      .then(r => r.json())
+      .then(examData => {
+        setExam(examData)
+        // prefer URL param, fall back to exam's active_session_id
+        const urlSid = params.get('session')
+        const resolved = (urlSid && urlSid !== 'null') ? urlSid : examData.active_session_id
+        setSid(resolved)
+        sidRef.current = resolved
+      })
+  }, [examId])
+
+  // Phase 2 — once we have a real session id, load data + connect socket
+  useEffect(() => {
+    if (!sid) return
+
+    function loadData() {
+      fetch(`/api/sessions/${sid}/submissions`).then(r => r.json()).then(setSubmissions)
+      fetch(`/api/sessions/${sid}/events`).then(r => r.json()).then(setEvents)
+    }
+
+    loadData()
 
     const socket = io()
     socketRef.current = socket
-    socket.emit('join_session', { session_id: sessionId })
+
+    function joinRoom() {
+      socket.emit('join_session', { session_id: sid })
+    }
+
+    // Re-join the room on every (re)connect and reload data in case we missed events
+    socket.on('connect', () => {
+      joinRoom()
+      loadData()
+    })
 
     socket.on('student_joined', ({ student_name }) => {
       setStudents(s => s.find(x => x.name === student_name)
         ? s : [...s, { name: student_name, violations: 0, notes: 0, submitted: false }])
       addLog(`${student_name} joined`, 'info')
-      appendEvent(sessionId, student_name, 'joined')
+      appendEvent(student_name, 'joined')
     })
 
     socket.on('student_left', ({ student_name }) => {
       addLog(`${student_name} disconnected`, 'info')
-      appendEvent(sessionId, student_name, 'disconnected')
+      appendEvent(student_name, 'disconnected')
     })
 
     socket.on('student_violation', ({ student_name, count, at }) => {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, violations: count } : x))
       addLog(`${student_name} switched away (violation #${count})`, 'warn')
-      appendEvent(sessionId, student_name, 'violation', `#${count} – switched away from exam`, at)
+      appendEvent(student_name, 'violation', `#${count} – switched away from exam`, at)
     })
 
     socket.on('student_note', ({ student_name, action, at }) => {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, notes: (x.notes || 0) + 1 } : x))
       addLog(`${student_name} ${action}`, 'note')
-      appendEvent(sessionId, student_name, 'note', action, at)
+      appendEvent(student_name, 'note', action, at)
     })
 
     socket.on('submission', ({ student_name, violations, answers, submitted_at }) => {
@@ -176,18 +203,18 @@ export default function TeacherMonitor() {
         return [...prev, { student_name, violations, answers: answers || {}, submitted_at }]
       })
       addLog(`${student_name} submitted`, 'ok')
-      appendEvent(sessionId, student_name, 'submitted', null, submitted_at)
+      appendEvent(student_name, 'submitted', null, submitted_at)
     })
 
     return () => socket.disconnect()
-  }, [sessionId, examId])
+  }, [sid])
 
   function addLog(msg, type = 'info') {
     setLog(l => [{ msg, type, time: new Date().toLocaleTimeString() }, ...l].slice(0, 50))
   }
 
-  function appendEvent(session_id, student_name, type, detail = null, at = Date.now()) {
-    setEvents(ev => [...ev, { session_id, student_name, type, detail, at }])
+  function appendEvent(student_name, type, detail = null, at = Date.now()) {
+    setEvents(ev => [...ev, { session_id: sidRef.current, student_name, type, detail, at }])
   }
 
   const examUrl = `${window.location.origin}/student`
@@ -260,7 +287,7 @@ export default function TeacherMonitor() {
             <h2>Submissions ({submissions.length})</h2>
             {submissions.length > 0 && (
               <a
-                href={`/api/sessions/${sessionId}/export.csv`}
+                href={`/api/sessions/${sid}/export.csv`}
                 download
                 className={`btn-primary ${styles.exportBtn}`}
               >
