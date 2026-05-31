@@ -14,7 +14,10 @@ const io = new Server(httpServer, { cors: { origin: '*' } })
 app.use(express.json())
 
 // --- DB setup ---
-const db = new Database(path.join(__dirname, 'examlock.db'))
+// In production Railway mounts a volume at /data — use that path so
+// the database survives redeploys. Fall back to local for dev.
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'examlock.db')
+const db = new Database(dbPath)
 db.exec(`
   CREATE TABLE IF NOT EXISTS exams (
     id TEXT PRIMARY KEY,
@@ -283,6 +286,14 @@ io.on('connection', (socket) => {
       })
     }
   })
+})
+
+// Serve built frontend in production
+const distPath = path.join(__dirname, '../dist')
+app.use(express.static(distPath))
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next()
+  res.sendFile(path.join(distPath, 'index.html'))
 })
 
 const PORT = process.env.PORT || 3001
