@@ -289,11 +289,16 @@ io.on('connection', (socket) => {
 })
 
 // Serve built frontend in production
+// API and socket routes are already registered above — this catch-all
+// only fires for unmatched paths (React client-side routes).
+// Uses app.use (not app.get('*')) — Express 5 removed wildcard syntax.
 const distPath = path.join(__dirname, '../dist')
 app.use(express.static(distPath))
-app.get('*', (req, res, next) => {
+app.use((req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next()
-  res.sendFile(path.join(distPath, 'index.html'))
+  res.sendFile(path.join(distPath, 'index.html'), err => {
+    if (err) next(err)
+  })
 })
 
 const PORT = process.env.PORT || 3001
