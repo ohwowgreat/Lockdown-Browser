@@ -33,7 +33,7 @@ export default function TeacherLogin() {
     setLoading(false)
     if (!res.ok) { setError(data.error); return }
     login(data.token, data.teacher)
-    nav('/teacher')
+    nav(data.teacher.is_admin ? '/admin' : '/teacher')
   }
 
   return (

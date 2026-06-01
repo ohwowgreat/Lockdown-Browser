@@ -1,0 +1,125 @@
+.wrap { min-height: 100vh; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: #1a1a2e;
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.headerLeft { display: flex; align-items: center; gap: 0.75rem; }
+
+.logo {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #7c9ef8;
+  letter-spacing: -0.03em;
+}
+
+.adminBadge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #7c9ef820;
+  color: #7c9ef8;
+  border: 1px solid #7c9ef840;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.main {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.main h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+}
+
+.statsRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) { .statsRow { grid-template-columns: repeat(2, 1fr); } }
+
+.statCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  box-shadow: var(--shadow);
+}
+
+.statValue { font-size: 2rem; font-weight: 800; color: var(--accent); }
+.statLabel { font-size: 0.8125rem; color: var(--muted); font-weight: 500; }
+
+h2 {
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+.teacherList { display: flex; flex-direction: column; gap: 1rem; }
+
+.teacherCard { padding: 0; overflow: hidden; }
+
+.teacherRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  flex-wrap: wrap;
+}
+
+.teacherInfo { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.teacherName { font-size: 0.9375rem; font-weight: 600; display: flex; align-items: center; }
+
+.teacherMeta { font-size: 0.8125rem; color: var(--muted); }
+
+.teacherActions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.empty { padding: 1.5rem; text-align: center; color: var(--muted); font-size: 0.875rem; }
+
+.examList {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.examRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.625rem 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.examInfo { display: flex; flex-direction: column; gap: 0.125rem; }
+.examTitle { font-size: 0.875rem; font-weight: 500; }
+.examMeta  { font-size: 0.75rem; color: var(--muted); }
+.open   { color: var(--success); font-weight: 600; }
+.closed { color: var(--muted); }

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import fs from 'fs'
-import { signToken, requireAuth } from './auth.js'
+import { signToken, requireAuth, requireAdmin } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -36,6 +36,8 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    is_admin INTEGER DEFAULT 0,
+    is_suspended INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch())
   );
   CREATE TABLE IF NOT EXISTS exams (
@@ -79,6 +81,29 @@ try { db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`) } catch (_)
 try { db.exec(`ALTER TABLE exams ADD COLUMN is_active INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE exams ADD COLUMN teacher_id TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE exams ADD COLUMN settings TEXT`) } catch (_) {}
+try { db.exec(`ALTER TABLE teachers ADD COLUMN is_admin INTEGER DEFAULT 0`) } catch (_) {}
+try { db.exec(`ALTER TABLE teachers ADD COLUMN is_suspended INTEGER DEFAULT 0`) } catch (_) {}
+
+// ── Seed superadmin ───────────────────────────────────────────────────────────
+async function seedAdmin() {
+  const email = process.env.ADMIN_EMAIL
+  const password = process.env.ADMIN_PASSWORD
+  if (!email || !password) return
+  const existing = db.prepare('SELECT id, is_admin FROM teachers WHERE email = ?').get(email.toLowerCase())
+  if (existing) {
+    // Ensure the existing account has admin flag
+    if (!existing.is_admin) {
+      db.prepare('UPDATE teachers SET is_admin = 1 WHERE id = ?').run(existing.id)
+      console.log(`Granted admin to existing account: ${email}`)
+    }
+    return
+  }
+  const hash = await bcrypt.hash(password, 10)
+  db.prepare('INSERT INTO teachers (id, email, name, password_hash, is_admin) VALUES (?, ?, ?, ?, 1)')
+    .run(uuid(), email.toLowerCase(), 'Admin', hash)
+  console.log(`Superadmin created: ${email}`)
+}
+seedAdmin()
 
 const DEFAULT_SETTINGS = JSON.stringify({ detect_navigation: true, track_copy_paste: true, log_keystrokes: false })
 
@@ -105,18 +130,20 @@ app.post('/api/auth/register', async (req, res) => {
   const id = uuid()
   db.prepare('INSERT INTO teachers (id, email, name, password_hash) VALUES (?, ?, ?, ?)')
     .run(id, email.toLowerCase(), name, hash)
-  const token = signToken({ id, email: email.toLowerCase(), name })
-  res.json({ token, teacher: { id, email, name } })
+  const token = signToken({ id, email: email.toLowerCase(), name, is_admin: false })
+  res.json({ token, teacher: { id, email, name, is_admin: false } })
 })
 
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body
   const teacher = db.prepare('SELECT * FROM teachers WHERE email = ?').get(email?.toLowerCase())
   if (!teacher) return res.status(401).json({ error: 'Invalid email or password' })
+  if (teacher.is_suspended) return res.status(403).json({ error: 'This account has been suspended. Contact your administrator.' })
   const ok = await bcrypt.compare(password, teacher.password_hash)
   if (!ok) return res.status(401).json({ error: 'Invalid email or password' })
-  const token = signToken({ id: teacher.id, email: teacher.email, name: teacher.name })
-  res.json({ token, teacher: { id: teacher.id, email: teacher.email, name: teacher.name } })
+  const payload = { id: teacher.id, email: teacher.email, name: teacher.name, is_admin: !!teacher.is_admin }
+  const token = signToken(payload)
+  res.json({ token, teacher: { id: teacher.id, email: teacher.email, name: teacher.name, is_admin: !!teacher.is_admin } })
 })
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -276,6 +303,65 @@ app.get('/api/sessions/:id/export.csv', requireAuth, (req, res) => {
   res.setHeader('Content-Type', 'text/csv')
   res.setHeader('Content-Disposition', `attachment; filename="${exam.title.replace(/[^a-z0-9]/gi, '_')}_results.csv"`)
   res.send(csv)
+})
+
+// ── Admin routes ──────────────────────────────────────────────────────────────
+
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
+  const teachers   = db.prepare('SELECT COUNT(*) as n FROM teachers WHERE is_admin = 0').get().n
+  const exams      = db.prepare('SELECT COUNT(*) as n FROM exams').get().n
+  const sessions   = db.prepare('SELECT COUNT(*) as n FROM sessions').get().n
+  const submissions = db.prepare('SELECT COUNT(*) as n FROM submissions').get().n
+  res.json({ teachers, exams, sessions, submissions })
+})
+
+app.get('/api/admin/teachers', requireAdmin, (req, res) => {
+  const teachers = db.prepare(`
+    SELECT t.id, t.email, t.name, t.is_suspended, t.created_at,
+           COUNT(e.id) as exam_count
+    FROM teachers t
+    LEFT JOIN exams e ON e.teacher_id = t.id
+    WHERE t.is_admin = 0
+    GROUP BY t.id
+    ORDER BY t.created_at DESC
+  `).all()
+  res.json(teachers)
+})
+
+app.patch('/api/admin/teachers/:id/suspend', requireAdmin, (req, res) => {
+  const { is_suspended } = req.body
+  db.prepare('UPDATE teachers SET is_suspended = ? WHERE id = ? AND is_admin = 0')
+    .run(is_suspended ? 1 : 0, req.params.id)
+  res.json({ ok: true })
+})
+
+app.delete('/api/admin/teachers/:id', requireAdmin, (req, res) => {
+  // Delete teacher's exams, sessions, submissions, events, then the teacher
+  const exams = db.prepare('SELECT id FROM exams WHERE teacher_id = ?').all(req.params.id)
+  for (const exam of exams) {
+    const sessions = db.prepare('SELECT id FROM sessions WHERE exam_id = ?').all(exam.id)
+    for (const s of sessions) {
+      db.prepare('DELETE FROM submissions WHERE session_id = ?').run(s.id)
+      db.prepare('DELETE FROM events WHERE session_id = ?').run(s.id)
+    }
+    db.prepare('DELETE FROM sessions WHERE exam_id = ?').run(exam.id)
+  }
+  db.prepare('DELETE FROM exams WHERE teacher_id = ?').run(req.params.id)
+  db.prepare('DELETE FROM teachers WHERE id = ? AND is_admin = 0').run(req.params.id)
+  res.json({ ok: true })
+})
+
+app.get('/api/admin/teachers/:id/exams', requireAdmin, (req, res) => {
+  const exams = db.prepare(`
+    SELECT e.*, COUNT(s.id) as submission_count
+    FROM exams e
+    LEFT JOIN sessions ss ON ss.exam_id = e.id
+    LEFT JOIN submissions s ON s.session_id = ss.id
+    WHERE e.teacher_id = ?
+    GROUP BY e.id
+    ORDER BY e.created_at DESC
+  `).all(req.params.id)
+  res.json(exams.map(e => ({ ...e, questions: JSON.parse(e.questions), settings: JSON.parse(e.settings || '{}') })))
 })
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
