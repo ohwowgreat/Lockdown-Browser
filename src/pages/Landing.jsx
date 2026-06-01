@@ -9,7 +9,7 @@ export default function Landing() {
       <div className={styles.logo}>ExamLock</div>
       <p className={styles.tagline}>Secure in-class exams — no installs required</p>
       <div className={styles.cards}>
-        <button className={styles.roleCard} onClick={() => nav('/teacher')}>
+        <button className={styles.roleCard} onClick={() => nav('/teacher/login')}>
           <span className={styles.icon}>👩‍🏫</span>
           <strong>Teacher</strong>
           <span>Create &amp; monitor exams</span>

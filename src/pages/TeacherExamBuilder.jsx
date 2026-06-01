@@ -1,27 +1,67 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
+import { useAuth } from '../context/AuthContext'
 import styles from './TeacherExamBuilder.module.css'
 
 const QUESTION_TYPES = [
   { value: 'multiple_choice', label: 'Multiple Choice' },
-  { value: 'short_answer', label: 'Short Answer' },
-  { value: 'essay', label: 'Essay' },
+  { value: 'short_answer',    label: 'Short Answer' },
+  { value: 'essay',           label: 'Essay' },
+  { value: 'drawing',         label: 'Drawing' },
 ]
 
 function emptyQuestion() {
-  return {
-    id: uuid(),
-    type: 'multiple_choice',
-    text: '',
-    options: ['', '', '', ''],
-    correct: 0,
+  return { id: uuid(), type: 'multiple_choice', text: '', options: ['', '', '', ''], correct: 0, image: null }
+}
+
+function ImageUpload({ value, onChange, authHeaders }) {
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef()
+
+  async function handleFile(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploading(true)
+    const fd = new FormData()
+    fd.append('image', file)
+    const res = await fetch('/api/upload', { method: 'POST', headers: authHeaders(), body: fd })
+    const data = await res.json()
+    setUploading(false)
+    if (data.url) onChange(data.url)
   }
+
+  return (
+    <div className={styles.imageUpload}>
+      {value
+        ? (
+          <div className={styles.imagePreview}>
+            <img src={value} alt="Question image" />
+            <button className="btn-danger" onClick={() => onChange(null)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
+              Remove
+            </button>
+          </div>
+        )
+        : (
+          <button
+            className="btn-ghost"
+            onClick={() => inputRef.current.click()}
+            disabled={uploading}
+            style={{ fontSize: '0.8125rem' }}
+          >
+            {uploading ? 'Uploading...' : '+ Add Image'}
+          </button>
+        )
+      }
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+    </div>
+  )
 }
 
 export default function TeacherExamBuilder() {
   const nav = useNavigate()
   const { id } = useParams()
+  const { authHeaders } = useAuth()
   const isEdit = Boolean(id)
 
   const [title, setTitle] = useState('')
@@ -30,15 +70,14 @@ export default function TeacherExamBuilder() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (isEdit) {
-      fetch(`/api/exams/${id}`)
-        .then(r => r.json())
-        .then(data => {
-          setTitle(data.title)
-          setTimeLimit(data.time_limit)
-          setQuestions(data.questions)
-        })
-    }
+    if (!isEdit) return
+    fetch(`/api/exams/${id}`, { headers: authHeaders() })
+      .then(r => r.json())
+      .then(data => {
+        setTitle(data.title)
+        setTimeLimit(data.time_limit)
+        setQuestions(data.questions)
+      })
   }, [id])
 
   function updateQuestion(qid, patch) {
@@ -55,9 +94,7 @@ export default function TeacherExamBuilder() {
   }
 
   function addOption(qid) {
-    setQuestions(qs => qs.map(q =>
-      q.id === qid ? { ...q, options: [...q.options, ''] } : q
-    ))
+    setQuestions(qs => qs.map(q => q.id === qid ? { ...q, options: [...q.options, ''] } : q))
   }
 
   function removeOption(qid, idx) {
@@ -84,16 +121,12 @@ export default function TeacherExamBuilder() {
     if (questions.some(q => !q.text.trim())) { alert('All questions need text'); return }
     setSaving(true)
     const body = { title, questions, time_limit: Number(timeLimit) }
-    const res = await fetch(isEdit ? `/api/exams/${id}` : '/api/exams', {
+    await fetch(isEdit ? `/api/exams/${id}` : '/api/exams', {
       method: isEdit ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     })
-    const data = await res.json()
     setSaving(false)
-    if (!isEdit && data.code) {
-      alert(`Exam saved! Code: ${data.code}`)
-    }
     nav('/teacher')
   }
 
@@ -137,39 +170,34 @@ export default function TeacherExamBuilder() {
 
             <div style={{ marginTop: '0.75rem' }}>
               <label>Question</label>
-              <textarea
-                rows={2}
-                value={q.text}
-                onChange={e => updateQuestion(q.id, { text: e.target.value })}
-                placeholder="Enter your question..."
-              />
+              <textarea rows={2} value={q.text} onChange={e => updateQuestion(q.id, { text: e.target.value })} placeholder="Enter your question..." />
             </div>
+
+            <ImageUpload
+              value={q.image}
+              onChange={url => updateQuestion(q.id, { image: url })}
+              authHeaders={authHeaders}
+            />
 
             {q.type === 'multiple_choice' && (
               <div className={styles.options}>
                 <label>Answer Options</label>
                 {q.options.map((opt, i) => (
                   <div key={i} className={styles.optionRow}>
-                    <input
-                      type="radio"
-                      name={`correct-${q.id}`}
-                      checked={q.correct === i}
-                      onChange={() => updateQuestion(q.id, { correct: i })}
-                      title="Mark as correct answer"
-                    />
-                    <input
-                      value={opt}
-                      onChange={e => updateOption(q.id, i, e.target.value)}
-                      placeholder={`Option ${i + 1}`}
-                    />
+                    <input type="radio" name={`correct-${q.id}`} checked={q.correct === i} onChange={() => updateQuestion(q.id, { correct: i })} title="Mark as correct" />
+                    <input value={opt} onChange={e => updateOption(q.id, i, e.target.value)} placeholder={`Option ${i + 1}`} />
                     <button className="btn-ghost" onClick={() => removeOption(q.id, i)} disabled={q.options.length <= 2}>✕</button>
                   </div>
                 ))}
-                <button className="btn-ghost" onClick={() => addOption(q.id)} style={{ marginTop: '0.25rem' }}>
-                  + Add Option
-                </button>
+                <button className="btn-ghost" onClick={() => addOption(q.id)} style={{ marginTop: '0.25rem' }}>+ Add Option</button>
                 <p className={styles.hint}>Select the radio button next to the correct answer</p>
               </div>
+            )}
+
+            {q.type === 'drawing' && (
+              <p className={styles.hint} style={{ marginTop: '0.75rem' }}>
+                Students will draw their answer on a canvas.
+              </p>
             )}
           </div>
         ))}

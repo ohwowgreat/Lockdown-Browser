@@ -1,21 +1,23 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import styles from './TeacherDashboard.module.css'
 
 export default function TeacherDashboard() {
   const nav = useNavigate()
+  const { teacher, logout, authHeaders } = useAuth()
   const [exams, setExams] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/exams')
+    fetch('/api/exams', { headers: authHeaders() })
       .then(r => r.json())
       .then(data => { setExams(data); setLoading(false) })
   }, [])
 
   async function deleteExam(id) {
     if (!confirm('Delete this exam?')) return
-    await fetch(`/api/exams/${id}`, { method: 'DELETE' })
+    await fetch(`/api/exams/${id}`, { method: 'DELETE', headers: authHeaders() })
     setExams(exams.filter(e => e.id !== id))
   }
 
@@ -23,11 +25,10 @@ export default function TeacherDashboard() {
     const next = !exam.is_active
     const res = await fetch(`/api/exams/${exam.id}/active`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ is_active: next })
     })
     const data = await res.json()
-    // Update local state — also capture session_id if it was just created for a legacy exam
     setExams(exams.map(e =>
       e.id === exam.id
         ? { ...e, is_active: next, active_session_id: data.session_id || e.active_session_id }
@@ -45,10 +46,12 @@ export default function TeacherDashboard() {
         <div className={styles.headerLeft}>
           <span className={styles.logo} onClick={() => nav('/')}>ExamLock</span>
           <span className={styles.role}>Teacher</span>
+          <span className={styles.teacherName}>{teacher?.name}</span>
         </div>
-        <button className="btn-primary" onClick={() => nav('/teacher/exam/new')}>
-          + New Exam
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn-primary" onClick={() => nav('/teacher/exam/new')}>+ New Exam</button>
+          <button className="btn-ghost" onClick={() => { logout(); nav('/') }}>Log out</button>
+        </div>
       </header>
 
       <main className={styles.main}>

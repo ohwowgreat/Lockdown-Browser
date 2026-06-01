@@ -135,6 +135,26 @@
   resize: vertical;
 }
 
+.qImage {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+  object-fit: contain;
+}
+
+.drawingWrap { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
+
+.drawingToolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.drawingSaved { font-size: 0.75rem; color: var(--success); font-weight: 600; }
+
 .submitRow {
   display: flex;
   justify-content: center;

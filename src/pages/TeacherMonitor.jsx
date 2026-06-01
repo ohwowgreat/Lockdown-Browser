@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
+import { useAuth } from '../context/AuthContext'
 import styles from './TeacherMonitor.module.css'
 
 function calcScore(questions, answers) {
@@ -66,7 +67,11 @@ function SubmissionCard({ sub, exam, events }) {
                     {isCorrect === false && <span className={styles.answerMarkWrong}>✗ Wrong</span>}
                   </div>
                   <p className={styles.answerQ}>{q.text}</p>
-                  {q.type === 'multiple_choice' ? (
+                  {q.type === 'drawing' ? (
+                    ans
+                      ? <img src={ans} alt="Student drawing" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 6, border: '1px solid var(--border)', marginTop: 4 }} />
+                      : <p className={styles.noAnswer}>(no drawing)</p>
+                  ) : q.type === 'multiple_choice' ? (
                     <div className={styles.mcOptions}>
                       {q.options.map((opt, i) => (
                         <div
@@ -86,6 +91,7 @@ function SubmissionCard({ sub, exam, events }) {
                   ) : (
                     <p className={styles.answerA}>{ans || <em className={styles.noAnswer}>(no answer)</em>}</p>
                   )}
+
                 </div>
               )
             })}
@@ -124,6 +130,7 @@ export default function TeacherMonitor() {
   const nav = useNavigate()
   const { id: examId } = useParams()
   const [params] = useSearchParams()
+  const { authHeaders } = useAuth()
 
   const [exam, setExam] = useState(null)
   const [sid, setSid] = useState(null)          // resolved session id
@@ -136,7 +143,7 @@ export default function TeacherMonitor() {
 
   // Phase 1 — load exam, derive real session id
   useEffect(() => {
-    fetch(`/api/exams/${examId}`)
+    fetch(`/api/exams/${examId}`, { headers: authHeaders() })
       .then(r => r.json())
       .then(examData => {
         setExam(examData)
@@ -153,8 +160,8 @@ export default function TeacherMonitor() {
     if (!sid) return
 
     function loadData() {
-      fetch(`/api/sessions/${sid}/submissions`).then(r => r.json()).then(setSubmissions)
-      fetch(`/api/sessions/${sid}/events`).then(r => r.json()).then(setEvents)
+      fetch(`/api/sessions/${sid}/submissions`, { headers: authHeaders() }).then(r => r.json()).then(setSubmissions)
+      fetch(`/api/sessions/${sid}/events`,     { headers: authHeaders() }).then(r => r.json()).then(setEvents)
     }
 
     loadData()
