@@ -58,6 +58,26 @@ function ImageUpload({ value, onChange, authHeaders }) {
   )
 }
 
+const DEFAULT_SETTINGS = { detect_navigation: true, track_copy_paste: true, log_keystrokes: false }
+
+const RESTRICTIONS = [
+  {
+    key: 'detect_navigation',
+    label: 'Detect navigation away',
+    desc: 'Flag as a violation when student switches tabs, windows, or apps',
+  },
+  {
+    key: 'track_copy_paste',
+    label: 'Track copy & paste',
+    desc: 'Log copy and paste actions as notes (not violations)',
+  },
+  {
+    key: 'log_keystrokes',
+    label: 'Keystroke logging',
+    desc: 'Record all keystrokes students press during the exam',
+  },
+]
+
 export default function TeacherExamBuilder() {
   const nav = useNavigate()
   const { id } = useParams()
@@ -67,7 +87,12 @@ export default function TeacherExamBuilder() {
   const [title, setTitle] = useState('')
   const [timeLimit, setTimeLimit] = useState(0)
   const [questions, setQuestions] = useState([emptyQuestion()])
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [saving, setSaving] = useState(false)
+
+  function toggleSetting(key) {
+    setSettings(s => ({ ...s, [key]: !s[key] }))
+  }
 
   useEffect(() => {
     if (!isEdit) return
@@ -77,6 +102,7 @@ export default function TeacherExamBuilder() {
         setTitle(data.title)
         setTimeLimit(data.time_limit)
         setQuestions(data.questions)
+        if (data.settings) setSettings(data.settings)
       })
   }, [id])
 
@@ -120,7 +146,7 @@ export default function TeacherExamBuilder() {
     if (!title.trim()) { alert('Please add a title'); return }
     if (questions.some(q => !q.text.trim())) { alert('All questions need text'); return }
     setSaving(true)
-    const body = { title, questions, time_limit: Number(timeLimit) }
+    const body = { title, questions, time_limit: Number(timeLimit), settings }
     await fetch(isEdit ? `/api/exams/${id}` : '/api/exams', {
       method: isEdit ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -151,6 +177,28 @@ export default function TeacherExamBuilder() {
               <label>Time Limit (minutes, 0 = none)</label>
               <input type="number" min="0" value={timeLimit} onChange={e => setTimeLimit(e.target.value)} />
             </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginTop: '1rem' }}>
+          <p className={styles.sectionLabel}>Restrictions</p>
+          <div className={styles.restrictions}>
+            {RESTRICTIONS.map(r => (
+              <label key={r.key} className={styles.restrictionRow}>
+                <div className={styles.restrictionText}>
+                  <span className={styles.restrictionLabel}>{r.label}</span>
+                  <span className={styles.restrictionDesc}>{r.desc}</span>
+                </div>
+                <div
+                  className={`${styles.toggle} ${settings[r.key] ? styles.toggleOn : ''}`}
+                  onClick={() => toggleSetting(r.key)}
+                  role="switch"
+                  aria-checked={settings[r.key]}
+                >
+                  <div className={styles.toggleThumb} />
+                </div>
+              </label>
+            ))}
           </div>
         </div>
 

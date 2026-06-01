@@ -92,6 +92,7 @@ export default function StudentExam() {
     sessionId,
     studentName,
     enabled: Boolean(exam && !submitted),
+    settings: exam?.settings,
   })
 
   const submitExam = useCallback(async () => {

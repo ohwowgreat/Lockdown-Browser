@@ -78,6 +78,9 @@ db.exec(`
 try { db.exec(`ALTER TABLE exams ADD COLUMN active_session_id TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE exams ADD COLUMN is_active INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE exams ADD COLUMN teacher_id TEXT`) } catch (_) {}
+try { db.exec(`ALTER TABLE exams ADD COLUMN settings TEXT`) } catch (_) {}
+
+const DEFAULT_SETTINGS = JSON.stringify({ detect_navigation: true, track_copy_paste: true, log_keystrokes: false })
 
 const insertEvent = db.prepare(
   'INSERT INTO events (id, session_id, student_name, type, detail, at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -129,34 +132,37 @@ app.post('/api/upload', requireAuth, upload.single('image'), (req, res) => {
 
 // ── Exam routes (teacher-scoped) ─────────────────────────────────────────────
 
+function parseExam(e) {
+  return { ...e, questions: JSON.parse(e.questions), settings: JSON.parse(e.settings || DEFAULT_SETTINGS) }
+}
+
 app.get('/api/exams', requireAuth, (req, res) => {
-  const exams = db.prepare('SELECT * FROM exams WHERE teacher_id = ? ORDER BY created_at DESC')
-    .all(req.teacher.id)
-  res.json(exams.map(e => ({ ...e, questions: JSON.parse(e.questions) })))
+  const exams = db.prepare('SELECT * FROM exams WHERE teacher_id = ? ORDER BY created_at DESC').all(req.teacher.id)
+  res.json(exams.map(parseExam))
 })
 
 app.post('/api/exams', requireAuth, (req, res) => {
-  const { title, questions, time_limit } = req.body
+  const { title, questions, time_limit, settings } = req.body
   const id = uuid()
   let code = generateCode()
   while (db.prepare('SELECT id FROM exams WHERE code = ?').get(code)) code = generateCode()
   const sessionId = uuid()
   db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, id, Date.now())
-  db.prepare('INSERT INTO exams (id, teacher_id, title, questions, time_limit, code, active_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(id, req.teacher.id, title, JSON.stringify(questions), time_limit || 0, code, sessionId)
+  db.prepare('INSERT INTO exams (id, teacher_id, title, questions, time_limit, code, active_session_id, settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, req.teacher.id, title, JSON.stringify(questions), time_limit || 0, code, sessionId, JSON.stringify(settings || JSON.parse(DEFAULT_SETTINGS)))
   res.json({ id, code })
 })
 
 app.get('/api/exams/:id', requireAuth, (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
   if (!exam) return res.status(404).json({ error: 'Not found' })
-  res.json({ ...exam, questions: JSON.parse(exam.questions) })
+  res.json(parseExam(exam))
 })
 
 app.put('/api/exams/:id', requireAuth, (req, res) => {
-  const { title, questions, time_limit } = req.body
-  db.prepare('UPDATE exams SET title = ?, questions = ?, time_limit = ? WHERE id = ? AND teacher_id = ?')
-    .run(title, JSON.stringify(questions), time_limit || 0, req.params.id, req.teacher.id)
+  const { title, questions, time_limit, settings } = req.body
+  db.prepare('UPDATE exams SET title = ?, questions = ?, time_limit = ?, settings = ? WHERE id = ? AND teacher_id = ?')
+    .run(title, JSON.stringify(questions), time_limit || 0, JSON.stringify(settings || JSON.parse(DEFAULT_SETTINGS)), req.params.id, req.teacher.id)
   res.json({ ok: true })
 })
 
@@ -185,7 +191,7 @@ app.get('/api/exams/code/:code', (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE code = ?').get(req.params.code.toUpperCase())
   if (!exam) return res.status(404).json({ error: 'Invalid code' })
   if (!exam.is_active) return res.status(400).json({ error: 'This exam is not open yet. Wait for your teacher to open it.' })
-  res.json({ ...exam, questions: JSON.parse(exam.questions) })
+  res.json(parseExam(exam))
 })
 
 app.post('/api/submissions', (req, res) => {
@@ -293,6 +299,13 @@ io.on('connection', (socket) => {
   socket.on('note', ({ session_id, student_name, action }) => {
     logEvent(session_id, student_name, 'note', action)
     io.to(`session:${session_id}`).emit('student_note', { student_name, action, at: Date.now() })
+  })
+
+  socket.on('keystrokes', ({ session_id, student_name, keys }) => {
+    if (!keys?.length) return
+    const detail = keys.map(k => k.key).join(', ')
+    logEvent(session_id, student_name, 'keystrokes', detail)
+    io.to(`session:${session_id}`).emit('student_keystrokes', { student_name, keys, at: Date.now() })
   })
 
   socket.on('disconnect', () => {

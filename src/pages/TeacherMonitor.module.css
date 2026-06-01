@@ -106,9 +106,10 @@ h2 {
 .logRow:last-child { border-bottom: none; }
 .logTime { color: var(--muted); flex-shrink: 0; }
 
-.log_warn  { background: var(--warning-light); }
-.log_note  { background: var(--accent-light); }
-.log_ok    { background: var(--success-light); }
+.log_warn      { background: var(--warning-light); }
+.log_note      { background: var(--accent-light); }
+.log_ok        { background: var(--success-light); }
+.log_keystroke { background: #f5f5f5; color: var(--muted); font-family: monospace; font-size: 0.75rem; }
 
 /* ---- Submissions ---- */
 
@@ -266,3 +267,4 @@ h2 {
 .event_violation   { background: var(--warning-light); }
 .event_note        { background: var(--accent-light); }
 .event_submitted   { background: var(--success-light); }
+.event_keystrokes  { background: #f5f5f5; font-family: monospace; font-size: 0.75rem; color: var(--muted); }

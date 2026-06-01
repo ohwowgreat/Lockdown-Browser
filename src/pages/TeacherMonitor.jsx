@@ -113,6 +113,7 @@ function SubmissionCard({ sub, exam, events }) {
                       {e.type === 'submitted'    && '✅ '}
                       {e.type === 'joined'       && '→ '}
                       {e.type === 'disconnected' && '← '}
+                      {e.type === 'keystrokes'   && '⌨️ '}
                       {e.detail || e.type}
                     </span>
                   </div>
@@ -203,6 +204,12 @@ export default function TeacherMonitor() {
       appendEvent(student_name, 'note', action, at)
     })
 
+    socket.on('student_keystrokes', ({ student_name, keys, at }) => {
+      const preview = keys.slice(0, 8).map(k => k.key).join(', ') + (keys.length > 8 ? '…' : '')
+      addLog(`${student_name} typed: ${preview}`, 'keystroke')
+      appendEvent(student_name, 'keystrokes', keys.map(k => k.key).join(', '), at)
+    })
+
     socket.on('submission', ({ student_name, violations, answers, submitted_at }) => {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, submitted: true } : x))
       setSubmissions(prev => {
@@ -277,9 +284,10 @@ export default function TeacherMonitor() {
                 <div key={i} className={`${styles.logRow} ${styles[`log_${l.type}`]}`}>
                   <span className={styles.logTime}>{l.time}</span>
                   <span>
-                    {l.type === 'warn' && '⚠️ '}
-                    {l.type === 'note' && '📋 '}
-                    {l.type === 'ok'   && '✅ '}
+                    {l.type === 'warn'      && '⚠️ '}
+                    {l.type === 'note'      && '📋 '}
+                    {l.type === 'ok'        && '✅ '}
+                    {l.type === 'keystroke' && '⌨️ '}
                     {l.msg}
                   </span>
                 </div>

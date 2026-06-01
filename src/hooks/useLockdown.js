@@ -1,19 +1,21 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
-export function useLockdown({ sessionId, studentName, enabled = true }) {
+const DEFAULT_SETTINGS = { detect_navigation: true, track_copy_paste: true, log_keystrokes: false }
+
+export function useLockdown({ sessionId, studentName, enabled = true, settings = DEFAULT_SETTINGS }) {
   const [violations, setViolations] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [warningMsg, setWarningMsg] = useState('')
 
-  // Refs so callbacks always read the latest values — no stale closures
   const violationsRef    = useRef(0)
   const socketRef        = useRef(null)
   const sessionIdRef     = useRef(sessionId)
   const studentNameRef   = useRef(studentName)
-  const lastViolationRef = useRef(0)   // for debounce
+  const lastViolationRef = useRef(0)
+  const keystrokeBuffer  = useRef([])    // batched keystrokes
+  const flushTimerRef    = useRef(null)
 
-  // Keep refs in sync with props
   useEffect(() => { sessionIdRef.current = sessionId },   [sessionId])
   useEffect(() => { studentNameRef.current = studentName }, [studentName])
 
@@ -22,11 +24,8 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     setTimeout(() => setWarningMsg(''), 3500)
   }, [])
 
-  // Stable — never recreated because it reads from refs, not props
+  // Stable violation emitter — reads from refs, never stale
   const recordViolation = useCallback((reason) => {
-    // Debounce: window.blur + visibilitychange can both fire for the
-    // same action (app switch on some platforms). Ignore the 2nd event
-    // within 800 ms so students don't get double-counted.
     const now = Date.now()
     if (now - lastViolationRef.current < 800) return
     lastViolationRef.current = now
@@ -41,7 +40,7 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     if (socketRef.current && sid && sname) {
       socketRef.current.emit('violation', { session_id: sid, student_name: sname, count })
     }
-  }, [warn])  // warn is stable; no sessionId/studentName deps needed — we use refs
+  }, [warn])
 
   const recordNote = useCallback((action) => {
     const sid   = sessionIdRef.current
@@ -49,7 +48,19 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     if (socketRef.current && sid && sname) {
       socketRef.current.emit('note', { session_id: sid, student_name: sname, action })
     }
-  }, [])  // stable
+  }, [])
+
+  const flushKeystrokes = useCallback(() => {
+    if (!keystrokeBuffer.current.length) return
+    const sid   = sessionIdRef.current
+    const sname = studentNameRef.current
+    if (socketRef.current && sid && sname) {
+      socketRef.current.emit('keystrokes', {
+        session_id: sid, student_name: sname, keys: [...keystrokeBuffer.current]
+      })
+    }
+    keystrokeBuffer.current = []
+  }, [])
 
   // ── Socket ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -64,17 +75,25 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
       })
     }
 
-    socket.on('connect', join)   // fires on first connect AND every reconnect
+    socket.on('connect', join)
     return () => {
+      flushKeystrokes()
       socket.off('connect', join)
       socket.disconnect()
     }
-  }, [enabled, sessionId])      // sessionId only to trigger reconnect when it changes
+  }, [enabled, sessionId, flushKeystrokes])
+
+  // Flush keystroke buffer every 15 seconds
+  useEffect(() => {
+    if (!enabled || !settings.log_keystrokes) return
+    flushTimerRef.current = setInterval(flushKeystrokes, 15000)
+    return () => clearInterval(flushTimerRef.current)
+  }, [enabled, settings.log_keystrokes, flushKeystrokes])
 
   // ── Fullscreen ────────────────────────────────────────────────────────────
   const requestFullscreen = useCallback(() => {
     const el = document.documentElement
-    if (el.requestFullscreen)        el.requestFullscreen()
+    if (el.requestFullscreen)            el.requestFullscreen()
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
   }, [])
 
@@ -88,7 +107,7 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     function onFsChange() {
       const fs = Boolean(document.fullscreenElement || document.webkitFullscreenElement)
       setIsFullscreen(fs)
-      if (!fs) recordViolation('Exited fullscreen')
+      if (!fs && settings.detect_navigation) recordViolation('Exited fullscreen')
     }
     document.addEventListener('fullscreenchange',       onFsChange)
     document.addEventListener('webkitfullscreenchange', onFsChange)
@@ -96,40 +115,29 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
       document.removeEventListener('fullscreenchange',       onFsChange)
       document.removeEventListener('webkitfullscreenchange', onFsChange)
     }
-  }, [enabled])   // recordViolation is now stable — no need to include it
+  }, [enabled, settings.detect_navigation])
 
-  // ── Visibility (tab switch, minimize) ─────────────────────────────────────
-  // Fires when the tab becomes hidden — works for in-browser tab switches
+  // ── Visibility (tab switch / minimize) ───────────────────────────────────
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !settings.detect_navigation) return
     function onVisibilityChange() {
       if (document.hidden) recordViolation('Left the exam tab')
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [enabled])
+  }, [enabled, settings.detect_navigation])
 
-  // ── Window blur (app switch) ───────────────────────────────────────────────
-  // visibilitychange does NOT fire on macOS when the user Cmd+Tabs to another
-  // app while the browser is in fullscreen. window.blur covers that case.
+  // ── Window blur (app switch — more reliable on macOS fullscreen) ─────────
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !settings.detect_navigation) return
     function onBlur() { recordViolation('Switched to another window or app') }
     window.addEventListener('blur', onBlur)
     return () => window.removeEventListener('blur', onBlur)
-  }, [enabled])
+  }, [enabled, settings.detect_navigation])
 
-  // ── Block right-click ─────────────────────────────────────────────────────
+  // ── Copy / paste tracking ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!enabled) return
-    function onContextMenu(e) { e.preventDefault() }
-    document.addEventListener('contextmenu', onContextMenu)
-    return () => document.removeEventListener('contextmenu', onContextMenu)
-  }, [enabled])
-
-  // ── Track copy / paste (note, not a violation) ────────────────────────────
-  useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !settings.track_copy_paste) return
     function onCopy()  { recordNote('copied text') }
     function onPaste() { recordNote('pasted text') }
     document.addEventListener('copy',  onCopy)
@@ -138,9 +146,26 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
       document.removeEventListener('copy',  onCopy)
       document.removeEventListener('paste', onPaste)
     }
-  }, [enabled])
+  }, [enabled, settings.track_copy_paste])
 
-  // ── Block keyboard shortcuts ──────────────────────────────────────────────
+  // ── Keystroke logging ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled || !settings.log_keystrokes) return
+    function onKeyDown(e) {
+      // Skip modifier-only keypresses; record the actual key + any modifiers
+      if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) return
+      keystrokeBuffer.current.push({
+        key:  e.key,
+        ctrl: e.ctrlKey || e.metaKey,
+        alt:  e.altKey,
+        at:   Date.now(),
+      })
+    }
+    document.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [enabled, settings.log_keystrokes])
+
+  // ── Block keyboard shortcuts (always on) ─────────────────────────────────
   useEffect(() => {
     if (!enabled) return
     function onKeyDown(e) {
@@ -162,6 +187,14 @@ export function useLockdown({ sessionId, studentName, enabled = true }) {
     }
     document.addEventListener('keydown', onKeyDown, { capture: true })
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [enabled])
+
+  // ── Block right-click (always on) ────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled) return
+    function onContextMenu(e) { e.preventDefault() }
+    document.addEventListener('contextmenu', onContextMenu)
+    return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [enabled])
 
   return { violations, isFullscreen, warningMsg, requestFullscreen, recordNote }
