@@ -88,7 +88,7 @@ export default function StudentExam() {
     return () => clearTimeout(t)
   }, [timeLeft, submitted])
 
-  const { violations, warningMsg, requestFullscreen, isFullscreen } = useLockdown({
+  const { violations, warningMsg, requestFullscreen, isFullscreen, awayBlocked, setAwayBlocked } = useLockdown({
     sessionId,
     studentName,
     enabled: Boolean(exam && !submitted),
@@ -127,6 +127,20 @@ export default function StudentExam() {
 
   return (
     <div className={styles.wrap}>
+      {/* Away blocker overlay — shown when navigation=block and student left */}
+      {awayBlocked && (
+        <div className={styles.awayOverlay}>
+          <div className={styles.awayBox}>
+            <div className={styles.awayIcon}>🚫</div>
+            <h2>You left the exam</h2>
+            <p>This has been recorded as a violation. Click the button below to return.</p>
+            <button className="btn-primary" onClick={() => { setAwayBlocked(false); requestFullscreen() }}>
+              Return to Exam
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Warning toast */}
       {warningMsg && (
         <div className={styles.warningToast}>{warningMsg}</div>

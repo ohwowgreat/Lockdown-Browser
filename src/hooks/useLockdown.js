@@ -1,19 +1,26 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
-const DEFAULT_SETTINGS = { detect_navigation: true, track_copy_paste: true, log_keystrokes: false }
+// Settings shape:
+//   navigation:  'off' | 'track' | 'block'
+//   copy_paste:  'off' | 'track' | 'block'
+//   log_keystrokes: boolean
+const DEFAULT_SETTINGS = { navigation: 'track', copy_paste: 'track', log_keystrokes: false }
 
 export function useLockdown({ sessionId, studentName, enabled = true, settings = DEFAULT_SETTINGS }) {
+  const s = { ...DEFAULT_SETTINGS, ...settings }
+
   const [violations, setViolations] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [warningMsg, setWarningMsg] = useState('')
+  const [awayBlocked, setAwayBlocked] = useState(false)  // overlay when blocked + returned
 
   const violationsRef    = useRef(0)
   const socketRef        = useRef(null)
   const sessionIdRef     = useRef(sessionId)
   const studentNameRef   = useRef(studentName)
   const lastViolationRef = useRef(0)
-  const keystrokeBuffer  = useRef([])    // batched keystrokes
+  const keystrokeBuffer  = useRef([])
   const flushTimerRef    = useRef(null)
 
   useEffect(() => { sessionIdRef.current = sessionId },   [sessionId])
@@ -24,27 +31,22 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     setTimeout(() => setWarningMsg(''), 3500)
   }, [])
 
-  // Stable violation emitter — reads from refs, never stale
   const recordViolation = useCallback((reason) => {
     const now = Date.now()
     if (now - lastViolationRef.current < 800) return
     lastViolationRef.current = now
-
     violationsRef.current += 1
     const count = violationsRef.current
     setViolations(count)
     warn(`⚠️ Violation #${count}: ${reason}`)
-
-    const sid   = sessionIdRef.current
-    const sname = studentNameRef.current
+    const sid = sessionIdRef.current, sname = studentNameRef.current
     if (socketRef.current && sid && sname) {
       socketRef.current.emit('violation', { session_id: sid, student_name: sname, count })
     }
   }, [warn])
 
   const recordNote = useCallback((action) => {
-    const sid   = sessionIdRef.current
-    const sname = studentNameRef.current
+    const sid = sessionIdRef.current, sname = studentNameRef.current
     if (socketRef.current && sid && sname) {
       socketRef.current.emit('note', { session_id: sid, student_name: sname, action })
     }
@@ -52,12 +54,9 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
 
   const flushKeystrokes = useCallback(() => {
     if (!keystrokeBuffer.current.length) return
-    const sid   = sessionIdRef.current
-    const sname = studentNameRef.current
+    const sid = sessionIdRef.current, sname = studentNameRef.current
     if (socketRef.current && sid && sname) {
-      socketRef.current.emit('keystrokes', {
-        session_id: sid, student_name: sname, keys: [...keystrokeBuffer.current]
-      })
+      socketRef.current.emit('keystrokes', { session_id: sid, student_name: sname, keys: [...keystrokeBuffer.current] })
     }
     keystrokeBuffer.current = []
   }, [])
@@ -67,28 +66,18 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     if (!enabled || !sessionId) return
     const socket = io()
     socketRef.current = socket
-
     function join() {
-      socket.emit('student_join', {
-        session_id:   sessionIdRef.current,
-        student_name: studentNameRef.current,
-      })
+      socket.emit('student_join', { session_id: sessionIdRef.current, student_name: studentNameRef.current })
     }
-
     socket.on('connect', join)
-    return () => {
-      flushKeystrokes()
-      socket.off('connect', join)
-      socket.disconnect()
-    }
+    return () => { flushKeystrokes(); socket.off('connect', join); socket.disconnect() }
   }, [enabled, sessionId, flushKeystrokes])
 
-  // Flush keystroke buffer every 15 seconds
   useEffect(() => {
-    if (!enabled || !settings.log_keystrokes) return
+    if (!enabled || !s.log_keystrokes) return
     flushTimerRef.current = setInterval(flushKeystrokes, 15000)
     return () => clearInterval(flushTimerRef.current)
-  }, [enabled, settings.log_keystrokes, flushKeystrokes])
+  }, [enabled, s.log_keystrokes, flushKeystrokes])
 
   // ── Fullscreen ────────────────────────────────────────────────────────────
   const requestFullscreen = useCallback(() => {
@@ -97,17 +86,14 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
   }, [])
 
-  useEffect(() => {
-    if (!enabled) return
-    requestFullscreen()
-  }, [enabled, requestFullscreen])
+  useEffect(() => { if (!enabled) return; requestFullscreen() }, [enabled, requestFullscreen])
 
   useEffect(() => {
     if (!enabled) return
     function onFsChange() {
       const fs = Boolean(document.fullscreenElement || document.webkitFullscreenElement)
       setIsFullscreen(fs)
-      if (!fs && settings.detect_navigation) recordViolation('Exited fullscreen')
+      if (!fs && s.navigation !== 'off') recordViolation('Exited fullscreen')
     }
     document.addEventListener('fullscreenchange',       onFsChange)
     document.addEventListener('webkitfullscreenchange', onFsChange)
@@ -115,55 +101,65 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
       document.removeEventListener('fullscreenchange',       onFsChange)
       document.removeEventListener('webkitfullscreenchange', onFsChange)
     }
-  }, [enabled, settings.detect_navigation])
+  }, [enabled, s.navigation])
 
-  // ── Visibility (tab switch / minimize) ───────────────────────────────────
+  // ── Navigation — visibility change ────────────────────────────────────────
   useEffect(() => {
-    if (!enabled || !settings.detect_navigation) return
+    if (!enabled || s.navigation === 'off') return
     function onVisibilityChange() {
-      if (document.hidden) recordViolation('Left the exam tab')
+      if (!document.hidden) return
+      recordViolation('Left the exam tab')
+      if (s.navigation === 'block') setAwayBlocked(true)
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [enabled, settings.detect_navigation])
+  }, [enabled, s.navigation])
 
-  // ── Window blur (app switch — more reliable on macOS fullscreen) ─────────
+  // ── Navigation — window blur (macOS fullscreen app switch) ────────────────
   useEffect(() => {
-    if (!enabled || !settings.detect_navigation) return
-    function onBlur() { recordViolation('Switched to another window or app') }
+    if (!enabled || s.navigation === 'off') return
+    function onBlur() {
+      recordViolation('Switched to another window or app')
+      if (s.navigation === 'block') setAwayBlocked(true)
+    }
     window.addEventListener('blur', onBlur)
     return () => window.removeEventListener('blur', onBlur)
-  }, [enabled, settings.detect_navigation])
+  }, [enabled, s.navigation])
 
-  // ── Copy / paste tracking ─────────────────────────────────────────────────
+  // ── Navigation — prevent accidental page close/refresh ───────────────────
   useEffect(() => {
-    if (!enabled || !settings.track_copy_paste) return
-    function onCopy()  { recordNote('copied text') }
-    function onPaste() { recordNote('pasted text') }
+    if (!enabled || s.navigation === 'off') return
+    function onBeforeUnload(e) { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [enabled, s.navigation])
+
+  // ── Copy / paste ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled || s.copy_paste === 'off') return
+    function onCopy(e) {
+      if (s.copy_paste === 'block') { e.preventDefault(); warn('Copying is not allowed during this exam') }
+      else recordNote('copied text')
+    }
+    function onPaste(e) {
+      if (s.copy_paste === 'block') { e.preventDefault(); warn('Pasting is not allowed during this exam') }
+      else recordNote('pasted text')
+    }
     document.addEventListener('copy',  onCopy)
     document.addEventListener('paste', onPaste)
-    return () => {
-      document.removeEventListener('copy',  onCopy)
-      document.removeEventListener('paste', onPaste)
-    }
-  }, [enabled, settings.track_copy_paste])
+    return () => { document.removeEventListener('copy', onCopy); document.removeEventListener('paste', onPaste) }
+  }, [enabled, s.copy_paste])
 
   // ── Keystroke logging ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!enabled || !settings.log_keystrokes) return
+    if (!enabled || !s.log_keystrokes) return
     function onKeyDown(e) {
-      // Skip modifier-only keypresses; record the actual key + any modifiers
       if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) return
-      keystrokeBuffer.current.push({
-        key:  e.key,
-        ctrl: e.ctrlKey || e.metaKey,
-        alt:  e.altKey,
-        at:   Date.now(),
-      })
+      keystrokeBuffer.current.push({ key: e.key, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, at: Date.now() })
     }
     document.addEventListener('keydown', onKeyDown, { capture: true })
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [enabled, settings.log_keystrokes])
+  }, [enabled, s.log_keystrokes])
 
   // ── Block keyboard shortcuts (always on) ─────────────────────────────────
   useEffect(() => {
@@ -174,16 +170,10 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
         ctrl && ['t', 'n', 'w', 'r', 'l'].includes(e.key.toLowerCase()),
         ctrl && e.key === 'Tab',
         ctrl && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase()),
-        e.key === 'F12',
-        e.key === 'F5',
+        e.key === 'F12', e.key === 'F5',
         e.altKey && e.key === 'Tab',
       ].some(Boolean)
-
-      if (blocked) {
-        e.preventDefault()
-        e.stopPropagation()
-        warn('That shortcut is disabled during the exam')
-      }
+      if (blocked) { e.preventDefault(); e.stopPropagation(); warn('That shortcut is disabled during the exam') }
     }
     document.addEventListener('keydown', onKeyDown, { capture: true })
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true })
@@ -197,5 +187,5 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [enabled])
 
-  return { violations, isFullscreen, warningMsg, requestFullscreen, recordNote }
+  return { violations, isFullscreen, warningMsg, awayBlocked, setAwayBlocked, requestFullscreen, recordNote }
 }

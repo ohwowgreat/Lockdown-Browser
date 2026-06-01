@@ -97,6 +97,31 @@
 .restrictionLabel { font-size: 0.875rem; font-weight: 500; }
 .restrictionDesc  { font-size: 0.75rem; color: var(--muted); }
 
+/* Segmented control */
+.segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.seg {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--muted);
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.seg:last-child { border-right: none; }
+.seg:hover:not(.segActive) { background: var(--bg); }
+.segActive { background: var(--accent); color: white; }
+
 /* Toggle switch */
 .toggle {
   width: 44px;

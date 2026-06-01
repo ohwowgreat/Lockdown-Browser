@@ -58,24 +58,18 @@ function ImageUpload({ value, onChange, authHeaders }) {
   )
 }
 
-const DEFAULT_SETTINGS = { detect_navigation: true, track_copy_paste: true, log_keystrokes: false }
+const DEFAULT_SETTINGS = { navigation: 'track', copy_paste: 'track', log_keystrokes: false }
 
-const RESTRICTIONS = [
-  {
-    key: 'detect_navigation',
-    label: 'Detect navigation away',
-    desc: 'Flag as a violation when student switches tabs, windows, or apps',
-  },
-  {
-    key: 'track_copy_paste',
-    label: 'Track copy & paste',
-    desc: 'Log copy and paste actions as notes (not violations)',
-  },
-  {
-    key: 'log_keystrokes',
-    label: 'Keystroke logging',
-    desc: 'Record all keystrokes students press during the exam',
-  },
+const NAV_OPTIONS = [
+  { value: 'off',   label: 'Off',    desc: 'No detection' },
+  { value: 'track', label: 'Track',  desc: 'Flag as violation' },
+  { value: 'block', label: 'Block',  desc: 'Show return overlay + flag' },
+]
+
+const CP_OPTIONS = [
+  { value: 'off',   label: 'Off',    desc: 'Allow freely' },
+  { value: 'track', label: 'Track',  desc: 'Log as note' },
+  { value: 'block', label: 'Block',  desc: 'Prevent entirely' },
 ]
 
 export default function TeacherExamBuilder() {
@@ -90,8 +84,8 @@ export default function TeacherExamBuilder() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [saving, setSaving] = useState(false)
 
-  function toggleSetting(key) {
-    setSettings(s => ({ ...s, [key]: !s[key] }))
+  function setSetting(key, value) {
+    setSettings(s => ({ ...s, [key]: value }))
   }
 
   useEffect(() => {
@@ -183,22 +177,63 @@ export default function TeacherExamBuilder() {
         <div className="card" style={{ marginTop: '1rem' }}>
           <p className={styles.sectionLabel}>Restrictions</p>
           <div className={styles.restrictions}>
-            {RESTRICTIONS.map(r => (
-              <label key={r.key} className={styles.restrictionRow}>
-                <div className={styles.restrictionText}>
-                  <span className={styles.restrictionLabel}>{r.label}</span>
-                  <span className={styles.restrictionDesc}>{r.desc}</span>
-                </div>
-                <div
-                  className={`${styles.toggle} ${settings[r.key] ? styles.toggleOn : ''}`}
-                  onClick={() => toggleSetting(r.key)}
-                  role="switch"
-                  aria-checked={settings[r.key]}
-                >
-                  <div className={styles.toggleThumb} />
-                </div>
-              </label>
-            ))}
+
+            <div className={styles.restrictionRow}>
+              <div className={styles.restrictionText}>
+                <span className={styles.restrictionLabel}>Navigation away</span>
+                <span className={styles.restrictionDesc}>
+                  What happens when a student switches tabs, windows or apps
+                </span>
+              </div>
+              <div className={styles.segmented}>
+                {NAV_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.seg} ${settings.navigation === o.value ? styles.segActive : ''}`}
+                    onClick={() => setSetting('navigation', o.value)}
+                    title={o.desc}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.restrictionRow}>
+              <div className={styles.restrictionText}>
+                <span className={styles.restrictionLabel}>Copy &amp; Paste</span>
+                <span className={styles.restrictionDesc}>
+                  Whether students can copy or paste text during the exam
+                </span>
+              </div>
+              <div className={styles.segmented}>
+                {CP_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    className={`${styles.seg} ${settings.copy_paste === o.value ? styles.segActive : ''}`}
+                    onClick={() => setSetting('copy_paste', o.value)}
+                    title={o.desc}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={`${styles.restrictionRow}`} style={{ borderBottom: 'none' }}>
+              <div className={styles.restrictionText}>
+                <span className={styles.restrictionLabel}>Keystroke logging</span>
+                <span className={styles.restrictionDesc}>Record all keys pressed during the exam</span>
+              </div>
+              <div
+                className={`${styles.toggle} ${settings.log_keystrokes ? styles.toggleOn : ''}`}
+                onClick={() => setSetting('log_keystrokes', !settings.log_keystrokes)}
+                role="switch"
+              >
+                <div className={styles.toggleThumb} />
+              </div>
+            </div>
+
           </div>
         </div>
 

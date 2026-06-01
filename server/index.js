@@ -105,7 +105,7 @@ async function seedAdmin() {
 }
 seedAdmin()
 
-const DEFAULT_SETTINGS = JSON.stringify({ detect_navigation: true, track_copy_paste: true, log_keystrokes: false })
+const DEFAULT_SETTINGS = JSON.stringify({ navigation: 'track', copy_paste: 'track', log_keystrokes: false })
 
 const insertEvent = db.prepare(
   'INSERT INTO events (id, session_id, student_name, type, detail, at) VALUES (?, ?, ?, ?, ?, ?)'
