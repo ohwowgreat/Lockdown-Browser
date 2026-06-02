@@ -161,8 +161,38 @@ export default function TeacherMonitor() {
     if (!sid) return
 
     function loadData() {
-      fetch(`/api/sessions/${sid}/submissions`, { headers: authHeaders() }).then(r => r.json()).then(setSubmissions)
-      fetch(`/api/sessions/${sid}/events`,     { headers: authHeaders() }).then(r => r.json()).then(setEvents)
+      // Load submissions and events in parallel, then rebuild students from both
+      Promise.all([
+        fetch(`/api/sessions/${sid}/submissions`, { headers: authHeaders() }).then(r => r.json()),
+        fetch(`/api/sessions/${sid}/events`,      { headers: authHeaders() }).then(r => r.json()),
+      ]).then(([subs, evts]) => {
+        setSubmissions(subs)
+        setEvents(evts)
+        // Rebuild students list from DB so the box is always populated
+        // even when the teacher opens the monitor after students joined
+        const studentMap = {}
+        for (const e of evts) {
+          if (!studentMap[e.student_name]) {
+            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false }
+          }
+          if (e.type === 'violation') {
+            const num = parseInt(e.detail?.match(/#(\d+)/)?.[1] || 0)
+            studentMap[e.student_name].violations = Math.max(studentMap[e.student_name].violations, num)
+          }
+          if (e.type === 'note')      studentMap[e.student_name].notes += 1
+          if (e.type === 'submitted') studentMap[e.student_name].submitted = true
+        }
+        // Also mark submitted from submissions table
+        for (const s of subs) {
+          if (!studentMap[s.student_name]) {
+            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true }
+          } else {
+            studentMap[s.student_name].submitted = true
+            studentMap[s.student_name].violations = Math.max(studentMap[s.student_name].violations, s.violations)
+          }
+        }
+        setStudents(Object.values(studentMap))
+      })
     }
 
     loadData()
