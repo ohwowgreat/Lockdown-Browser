@@ -139,11 +139,11 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     if (!enabled || s.copy_paste === 'off') return
     function onCopy(e) {
       if (s.copy_paste === 'block') { e.preventDefault(); warn('Copying is not allowed during this exam') }
-      else recordNote('copied text')
+      recordNote('copied text')  // always track regardless of block/track
     }
     function onPaste(e) {
       if (s.copy_paste === 'block') { e.preventDefault(); warn('Pasting is not allowed during this exam') }
-      else recordNote('pasted text')
+      recordNote('pasted text')  // always track regardless of block/track
     }
     document.addEventListener('copy',  onCopy)
     document.addEventListener('paste', onPaste)
