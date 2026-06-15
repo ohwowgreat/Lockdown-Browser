@@ -57,6 +57,20 @@ export default function StudentExam() {
   const [timeLeft, setTimeLeft] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
+
+  // Where answers are mirrored locally so a dropped connection, refresh, or
+  // crash never loses work. Keyed per session+student.
+  const answersKey = sessionId && studentName ? `ld_answers:${sessionId}:${studentName}` : null
+
+  // Track connectivity so we can show the student whether their work is syncing.
+  useEffect(() => {
+    const up = () => setOnline(true)
+    const down = () => setOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
+  }, [])
 
   // Load from sessionStorage
   useEffect(() => {
@@ -80,6 +94,23 @@ export default function StudentExam() {
     }
   }, [nav])
 
+  // Restore any locally-saved answers (e.g. after an accidental refresh while
+  // offline) once we know which session/student this is.
+  useEffect(() => {
+    if (!answersKey) return
+    try {
+      const saved = localStorage.getItem(answersKey)
+      if (saved) setAnswers(prev => (Object.keys(prev).length ? prev : JSON.parse(saved)))
+    } catch (_) {}
+  }, [answersKey])
+
+  // Mirror answers to localStorage on every change so nothing is lost if the
+  // network drops or the tab reloads before submission.
+  useEffect(() => {
+    if (!answersKey || submitted) return
+    try { localStorage.setItem(answersKey, JSON.stringify(answers)) } catch (_) {}
+  }, [answers, answersKey, submitted])
+
   // Countdown timer
   useEffect(() => {
     if (timeLeft === null || submitted) return
@@ -98,17 +129,30 @@ export default function StudentExam() {
   const submitExam = useCallback(async () => {
     if (submitting || submitted || !sessionId) return
     setSubmitting(true)
-    await fetch('/api/submissions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, student_name: studentName, answers, violations }),
-    })
+    // Keep retrying through dropped/flaky connections — answers stay saved
+    // locally, so the student never loses work waiting for the network.
+    const payload = JSON.stringify({ session_id: sessionId, student_name: studentName, answers, violations })
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetch('/api/submissions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        break
+      } catch (_) {
+        // Wait before retrying (capped), then try again. Loop never gives up.
+        await new Promise(r => setTimeout(r, Math.min(2000 * (attempt + 1), 10000)))
+      }
+    }
     setSubmitted(true)
+    if (answersKey) { try { localStorage.removeItem(answersKey) } catch (_) {} }
     // Exit fullscreen
     if (document.exitFullscreen) document.exitFullscreen()
     sessionStorage.clear()
     nav('/student/done')
-  }, [submitting, submitted, sessionId, studentName, answers, violations, nav])
+  }, [submitting, submitted, sessionId, studentName, answers, violations, answersKey, nav])
 
   function setAnswer(qid, value) {
     setAnswers(a => ({ ...a, [qid]: value }))
@@ -127,6 +171,13 @@ export default function StudentExam() {
 
   return (
     <div className={styles.wrap}>
+      {/* Offline banner — reassures the student their work is saved locally */}
+      {!online && !submitted && (
+        <div className={styles.offlineBar}>
+          ⚠️ You’re offline — keep working. Your answers are saved on this device and will submit once you reconnect.
+        </div>
+      )}
+
       {/* Break overlay — teacher granted a pause (e.g. bathroom). Hides the
           exam, suppresses violations, and waits for the teacher to resume. */}
       {paused && (
@@ -239,7 +290,9 @@ export default function StudentExam() {
             onClick={submitExam}
             disabled={submitting}
           >
-            {submitting ? 'Submitting...' : `Submit Exam (${answered}/${total} answered)`}
+            {submitting
+              ? (online ? 'Submitting…' : 'Waiting for connection — answers saved…')
+              : `Submit Exam (${answered}/${total} answered)`}
           </button>
         </div>
       </main>
