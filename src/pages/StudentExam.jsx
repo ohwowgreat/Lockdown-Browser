@@ -156,9 +156,13 @@ export default function StudentExam() {
         </div>
       )}
 
+      {/* Name watermark — deters screenshot/photo sharing */}
+      {studentName && <div className={styles.nameWatermark} aria-hidden="true">{studentName}</div>}
+
       <header className={styles.header}>
         <div className={styles.examTitle}>{exam.title}</div>
         <div className={styles.headerRight}>
+          <span className={styles.studentBadge}>👤 {studentName}</span>
           <span className={styles.progress}>{answered}/{total} answered</span>
           {timeLeft !== null && (
             <span className={`${styles.timer} ${timeLeft < 60 ? styles.timerRed : ''}`}>

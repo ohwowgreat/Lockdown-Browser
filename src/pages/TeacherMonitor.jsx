@@ -173,7 +173,7 @@ export default function TeacherMonitor() {
         const studentMap = {}
         for (const e of evts) {
           if (!studentMap[e.student_name]) {
-            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false }
+            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false, ip: null }
           }
           if (e.type === 'violation') {
             const num = parseInt(e.detail?.match(/#(\d+)/)?.[1] || 0)
@@ -181,14 +181,16 @@ export default function TeacherMonitor() {
           }
           if (e.type === 'note')      studentMap[e.student_name].notes += 1
           if (e.type === 'submitted') studentMap[e.student_name].submitted = true
+          if (e.type === 'joined' && e.detail?.startsWith('IP ')) studentMap[e.student_name].ip = e.detail.slice(3)
         }
         // Also mark submitted from submissions table
         for (const s of subs) {
           if (!studentMap[s.student_name]) {
-            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true }
+            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true, ip: s.ip || null }
           } else {
             studentMap[s.student_name].submitted = true
             studentMap[s.student_name].violations = Math.max(studentMap[s.student_name].violations, s.violations)
+            studentMap[s.student_name].ip = studentMap[s.student_name].ip || s.ip || null
           }
         }
         setStudents(Object.values(studentMap))
@@ -210,11 +212,12 @@ export default function TeacherMonitor() {
       loadData()
     })
 
-    socket.on('student_joined', ({ student_name }) => {
+    socket.on('student_joined', ({ student_name, ip }) => {
       setStudents(s => s.find(x => x.name === student_name)
-        ? s : [...s, { name: student_name, violations: 0, notes: 0, submitted: false }])
-      addLog(`${student_name} joined`, 'info')
-      appendEvent(student_name, 'joined')
+        ? s.map(x => x.name === student_name ? { ...x, ip: x.ip || ip || null } : x)
+        : [...s, { name: student_name, violations: 0, notes: 0, submitted: false, ip: ip || null }])
+      addLog(`${student_name} joined${ip ? ` (${ip})` : ''}`, 'info')
+      appendEvent(student_name, 'joined', ip ? `IP ${ip}` : null)
     })
 
     socket.on('student_left', ({ student_name }) => {
@@ -240,11 +243,11 @@ export default function TeacherMonitor() {
       appendEvent(student_name, 'keystrokes', keys.map(k => k.key).join(', '), at)
     })
 
-    socket.on('submission', ({ student_name, violations, answers, submitted_at }) => {
-      setStudents(s => s.map(x => x.name === student_name ? { ...x, submitted: true } : x))
+    socket.on('submission', ({ student_name, violations, answers, ip, submitted_at }) => {
+      setStudents(s => s.map(x => x.name === student_name ? { ...x, submitted: true, ip: x.ip || ip || null } : x))
       setSubmissions(prev => {
         if (prev.find(p => p.student_name === student_name)) return prev
-        return [...prev, { student_name, violations, answers: answers || {}, submitted_at }]
+        return [...prev, { student_name, violations, answers: answers || {}, ip, submitted_at }]
       })
       addLog(`${student_name} submitted`, 'ok')
       appendEvent(student_name, 'submitted', null, submitted_at)
@@ -288,7 +291,10 @@ export default function TeacherMonitor() {
               {students.length === 0 && <p className={styles.empty}>Waiting for students to join...</p>}
               {students.map(s => (
                 <div key={s.name} className={styles.studentRow}>
-                  <span className={styles.studentName}>{s.name}</span>
+                  <span className={styles.studentName}>
+                    {s.name}
+                    {s.ip && <span className={styles.studentIp}>{s.ip}</span>}
+                  </span>
                   <div className={styles.studentBadges}>
                     {s.violations > 0 && (
                       <span className="badge badge-yellow">⚠️ {s.violations} violation{s.violations > 1 ? 's' : ''}</span>

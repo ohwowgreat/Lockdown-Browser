@@ -12,10 +12,17 @@ import { signToken, requireAuth, requireAdmin } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
+app.set('trust proxy', true)  // so req.ip reflects X-Forwarded-For behind a proxy
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 
 app.use(express.json({ limit: '10mb' }))
+
+// Best-effort client IP from a socket handshake (honours X-Forwarded-For).
+function socketIp(socket) {
+  const fwd = socket.handshake.headers['x-forwarded-for']
+  return (fwd ? fwd.split(',')[0].trim() : socket.handshake.address) || null
+}
 
 // --- Uploads ---
 const uploadsDir = process.env.UPLOADS_PATH || path.join(__dirname, '../uploads')
@@ -83,6 +90,7 @@ try { db.exec(`ALTER TABLE exams ADD COLUMN teacher_id TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE exams ADD COLUMN settings TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_admin INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_suspended INTEGER DEFAULT 0`) } catch (_) {}
+try { db.exec(`ALTER TABLE submissions ADD COLUMN ip TEXT`) } catch (_) {}
 
 // ── Seed superadmin ───────────────────────────────────────────────────────────
 async function seedAdmin() {
@@ -224,10 +232,11 @@ app.get('/api/exams/code/:code', (req, res) => {
 app.post('/api/submissions', (req, res) => {
   const { session_id, student_name, answers, violations } = req.body
   const id = uuid()
-  db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations) VALUES (?, ?, ?, ?, ?)')
-    .run(id, session_id, student_name, JSON.stringify(answers), violations || 0)
+  const ip = req.ip || null
+  db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations, ip) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, session_id, student_name, JSON.stringify(answers), violations || 0, ip)
   logEvent(session_id, student_name, 'submitted')
-  io.to(`session:${session_id}`).emit('submission', { id, student_name, violations, answers, submitted_at: Date.now() })
+  io.to(`session:${session_id}`).emit('submission', { id, student_name, violations, answers, ip, submitted_at: Date.now() })
   res.json({ id })
 })
 
@@ -265,7 +274,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, (req, res) => {
 
   const mcQuestions = questions.filter(q => q.type === 'multiple_choice')
   const headers = [
-    'Student Name', 'Submitted At',
+    'Student Name', 'IP Address', 'Submitted At',
     `Score (MC ${mcQuestions.length} questions)`,
     'Violations', 'Copy/Paste Events',
     ...questions.map((q, i) => `Q${i + 1}: ${q.text.replace(/"/g, '""')}`),
@@ -277,11 +286,14 @@ app.get('/api/sessions/:id/export.csv', requireAuth, (req, res) => {
     const mcCorrect = mcQuestions.filter(q => answers[q.id] === q.correct).length
     const studentEvents = eventsByStudent[s.student_name] || []
     const copyPasteCount = studentEvents.filter(e => e.type === 'note').length
+    // Prefer the IP saved with the submission; fall back to the join event.
+    const joinIp = studentEvents.find(e => e.type === 'joined' && e.detail?.startsWith('IP '))?.detail?.slice(3)
     const actionLog = studentEvents
       .map(e => `[${new Date(e.at).toLocaleTimeString()}] ${e.type}${e.detail ? ': ' + e.detail : ''}`)
       .join(' | ')
     return [
       s.student_name,
+      s.ip || joinIp || '',
       new Date(s.submitted_at * 1000).toLocaleString(),
       mcQuestions.length > 0 ? `${mcCorrect}/${mcQuestions.length}` : 'N/A',
       s.violations, copyPasteCount,
@@ -373,8 +385,9 @@ io.on('connection', (socket) => {
     socket.join(`session:${session_id}`)
     socket.data.session_id = session_id
     socket.data.student_name = student_name
-    logEvent(session_id, student_name, 'joined')
-    io.to(`session:${session_id}`).emit('student_joined', { id: socket.id, student_name, joined_at: Date.now() })
+    const ip = socketIp(socket)
+    logEvent(session_id, student_name, 'joined', ip ? `IP ${ip}` : null)
+    io.to(`session:${session_id}`).emit('student_joined', { id: socket.id, student_name, ip, joined_at: Date.now() })
   })
 
   socket.on('violation', ({ session_id, student_name, count }) => {

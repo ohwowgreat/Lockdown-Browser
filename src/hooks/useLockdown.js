@@ -7,6 +7,11 @@ import { io } from 'socket.io-client'
 //   log_keystrokes: boolean
 const DEFAULT_SETTINGS = { navigation: 'track', copy_paste: 'track', log_keystrokes: false }
 
+// How long a student may be "away" (tab hidden / window blurred / fullscreen
+// exited) before it counts as a violation. A quick, accidental blur that returns
+// within this window is forgiven; a deliberate exit that persists is recorded.
+const GRACE_MS = 2500
+
 export function useLockdown({ sessionId, studentName, enabled = true, settings = DEFAULT_SETTINGS }) {
   const s = { ...DEFAULT_SETTINGS, ...settings }
 
@@ -19,12 +24,15 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   const socketRef        = useRef(null)
   const sessionIdRef     = useRef(sessionId)
   const studentNameRef   = useRef(studentName)
-  const lastViolationRef = useRef(0)
   const keystrokeBuffer  = useRef([])
   const flushTimerRef    = useRef(null)
+  const awayTimerRef     = useRef(null)   // pending grace timer for the current away-episode
+  const awayReasonRef    = useRef('')
+  const blockNavRef      = useRef(s.navigation === 'block')
 
   useEffect(() => { sessionIdRef.current = sessionId },   [sessionId])
   useEffect(() => { studentNameRef.current = studentName }, [studentName])
+  useEffect(() => { blockNavRef.current = s.navigation === 'block' }, [s.navigation])
 
   const warn = useCallback((msg) => {
     setWarningMsg(msg)
@@ -32,9 +40,6 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   }, [])
 
   const recordViolation = useCallback((reason) => {
-    const now = Date.now()
-    if (now - lastViolationRef.current < 800) return
-    lastViolationRef.current = now
     violationsRef.current += 1
     const count = violationsRef.current
     setViolations(count)
@@ -44,6 +49,31 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
       socketRef.current.emit('violation', { session_id: sid, student_name: sname, count })
     }
   }, [warn])
+
+  // ── Away-episode tracking ──────────────────────────────────────────────────
+  // goneAway starts a grace timer; if the student returns (cameBack) before it
+  // fires, nothing is recorded. Multiple events for one action (blur +
+  // visibilitychange + fullscreenchange) collapse into a single episode. Each
+  // *completed* away-episode that outlasts the grace window counts once, so
+  // deliberate repeat exits each add a violation while accidental flickers don't.
+  const cameBack = useCallback(() => {
+    if (awayTimerRef.current) {
+      clearTimeout(awayTimerRef.current)
+      awayTimerRef.current = null
+    }
+  }, [])
+
+  const goneAway = useCallback((reason) => {
+    if (awayTimerRef.current) return
+    awayReasonRef.current = reason
+    awayTimerRef.current = setTimeout(() => {
+      awayTimerRef.current = null
+      recordViolation(awayReasonRef.current)
+      if (blockNavRef.current) setAwayBlocked(true)
+    }, GRACE_MS)
+  }, [recordViolation])
+
+  useEffect(() => () => { if (awayTimerRef.current) clearTimeout(awayTimerRef.current) }, [])
 
   const recordNote = useCallback((action) => {
     const sid = sessionIdRef.current, sname = studentNameRef.current
@@ -93,7 +123,9 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     function onFsChange() {
       const fs = Boolean(document.fullscreenElement || document.webkitFullscreenElement)
       setIsFullscreen(fs)
-      if (!fs && s.navigation !== 'off') recordViolation('Exited fullscreen')
+      if (s.navigation === 'off') return
+      if (fs) cameBack()
+      else    goneAway('Exited fullscreen')
     }
     document.addEventListener('fullscreenchange',       onFsChange)
     document.addEventListener('webkitfullscreenchange', onFsChange)
@@ -101,30 +133,33 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
       document.removeEventListener('fullscreenchange',       onFsChange)
       document.removeEventListener('webkitfullscreenchange', onFsChange)
     }
-  }, [enabled, s.navigation])
+  }, [enabled, s.navigation, goneAway, cameBack])
 
   // ── Navigation — visibility change ────────────────────────────────────────
   useEffect(() => {
     if (!enabled || s.navigation === 'off') return
     function onVisibilityChange() {
-      if (!document.hidden) return
-      recordViolation('Left the exam tab')
-      if (s.navigation === 'block') setAwayBlocked(true)
+      if (document.hidden) goneAway('Left the exam tab')
+      else                 cameBack()
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [enabled, s.navigation])
+  }, [enabled, s.navigation, goneAway, cameBack])
 
-  // ── Navigation — window blur (macOS fullscreen app switch) ────────────────
+  // ── Navigation — window blur/focus (macOS fullscreen app switch, Tab to
+  //    browser chrome). A blur that regains focus within the grace window is
+  //    forgiven, which absorbs accidental Tab-key focus jumps. ───────────────
   useEffect(() => {
     if (!enabled || s.navigation === 'off') return
-    function onBlur() {
-      recordViolation('Switched to another window or app')
-      if (s.navigation === 'block') setAwayBlocked(true)
+    function onBlur()  { goneAway('Switched to another window or app') }
+    function onFocus() { cameBack() }
+    window.addEventListener('blur',  onBlur)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('blur',  onBlur)
+      window.removeEventListener('focus', onFocus)
     }
-    window.addEventListener('blur', onBlur)
-    return () => window.removeEventListener('blur', onBlur)
-  }, [enabled, s.navigation])
+  }, [enabled, s.navigation, goneAway, cameBack])
 
   // ── Navigation — prevent accidental page close/refresh ───────────────────
   useEffect(() => {
