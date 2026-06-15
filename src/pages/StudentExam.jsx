@@ -88,7 +88,7 @@ export default function StudentExam() {
     return () => clearTimeout(t)
   }, [timeLeft, submitted])
 
-  const { violations, warningMsg, requestFullscreen, isFullscreen, awayBlocked, setAwayBlocked } = useLockdown({
+  const { violations, warningMsg, requestFullscreen, isFullscreen, awayBlocked, setAwayBlocked, paused } = useLockdown({
     sessionId,
     studentName,
     enabled: Boolean(exam && !submitted),
@@ -127,6 +127,18 @@ export default function StudentExam() {
 
   return (
     <div className={styles.wrap}>
+      {/* Break overlay — teacher granted a pause (e.g. bathroom). Hides the
+          exam, suppresses violations, and waits for the teacher to resume. */}
+      {paused && (
+        <div className={styles.breakOverlay}>
+          <div className={styles.breakBox}>
+            <div className={styles.breakIcon}>⏸️</div>
+            <h2>Break — paused by your teacher</h2>
+            <p>Your exam is on hold. The questions are hidden until your teacher resumes you. The timer keeps running.</p>
+          </div>
+        </div>
+      )}
+
       {/* Away blocker overlay — shown when navigation=block and student left */}
       {awayBlocked && (
         <div className={styles.awayOverlay}>

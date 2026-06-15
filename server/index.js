@@ -400,6 +400,14 @@ io.on('connection', (socket) => {
     io.to(`session:${session_id}`).emit('student_note', { student_name, action, at: Date.now() })
   })
 
+  // Teacher pauses/resumes a specific student (e.g. bathroom break).
+  // Broadcast to the whole session room: the matching student suppresses
+  // violations, and the monitor reflects the paused state.
+  socket.on('set_pause', ({ session_id, student_name, paused }) => {
+    logEvent(session_id, student_name, paused ? 'paused' : 'resumed')
+    io.to(`session:${session_id}`).emit('pause_state', { student_name, paused: !!paused, at: Date.now() })
+  })
+
   socket.on('keystrokes', ({ session_id, student_name, keys }) => {
     if (!keys?.length) return
     const detail = keys.map(k => k.key).join(', ')

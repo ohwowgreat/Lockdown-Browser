@@ -19,6 +19,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [warningMsg, setWarningMsg] = useState('')
   const [awayBlocked, setAwayBlocked] = useState(false)  // overlay when blocked + returned
+  const [paused, setPaused] = useState(false)            // teacher-granted break
 
   const violationsRef    = useRef(0)
   const socketRef        = useRef(null)
@@ -29,6 +30,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   const awayTimerRef     = useRef(null)   // pending grace timer for the current away-episode
   const awayReasonRef    = useRef('')
   const blockNavRef      = useRef(s.navigation === 'block')
+  const pausedRef        = useRef(false)  // synchronous gate for event handlers
 
   useEffect(() => { sessionIdRef.current = sessionId },   [sessionId])
   useEffect(() => { studentNameRef.current = studentName }, [studentName])
@@ -64,6 +66,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   }, [])
 
   const goneAway = useCallback((reason) => {
+    if (pausedRef.current) return        // on a teacher-granted break — no violations
     if (awayTimerRef.current) return
     awayReasonRef.current = reason
     awayTimerRef.current = setTimeout(() => {
@@ -91,6 +94,12 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     keystrokeBuffer.current = []
   }, [])
 
+  const requestFullscreen = useCallback(() => {
+    const el = document.documentElement
+    if (el.requestFullscreen)            el.requestFullscreen()
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+  }, [])
+
   // ── Socket ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!enabled || !sessionId) return
@@ -99,9 +108,29 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     function join() {
       socket.emit('student_join', { session_id: sessionIdRef.current, student_name: studentNameRef.current })
     }
+    function onPauseState({ student_name, paused: p }) {
+      if (student_name !== studentNameRef.current) return
+      pausedRef.current = p
+      setPaused(p)
+      if (p) {
+        // Starting a break: cancel any pending away-episode so the break
+        // itself never counts, and let the student leave the page freely.
+        cameBack()
+        setAwayBlocked(false)
+      } else {
+        // Break over: pull the student back into the exam.
+        requestFullscreen()
+      }
+    }
     socket.on('connect', join)
-    return () => { flushKeystrokes(); socket.off('connect', join); socket.disconnect() }
-  }, [enabled, sessionId, flushKeystrokes])
+    socket.on('pause_state', onPauseState)
+    return () => {
+      flushKeystrokes()
+      socket.off('connect', join)
+      socket.off('pause_state', onPauseState)
+      socket.disconnect()
+    }
+  }, [enabled, sessionId, flushKeystrokes, cameBack, requestFullscreen])
 
   useEffect(() => {
     if (!enabled || !s.log_keystrokes) return
@@ -110,12 +139,6 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   }, [enabled, s.log_keystrokes, flushKeystrokes])
 
   // ── Fullscreen ────────────────────────────────────────────────────────────
-  const requestFullscreen = useCallback(() => {
-    const el = document.documentElement
-    if (el.requestFullscreen)            el.requestFullscreen()
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
-  }, [])
-
   useEffect(() => { if (!enabled) return; requestFullscreen() }, [enabled, requestFullscreen])
 
   useEffect(() => {
@@ -222,5 +245,5 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [enabled])
 
-  return { violations, isFullscreen, warningMsg, awayBlocked, setAwayBlocked, requestFullscreen, recordNote }
+  return { violations, isFullscreen, warningMsg, awayBlocked, setAwayBlocked, paused, requestFullscreen, recordNote }
 }

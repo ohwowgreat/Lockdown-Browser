@@ -173,7 +173,7 @@ export default function TeacherMonitor() {
         const studentMap = {}
         for (const e of evts) {
           if (!studentMap[e.student_name]) {
-            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false, ip: null }
+            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false, ip: null, paused: false }
           }
           if (e.type === 'violation') {
             const num = parseInt(e.detail?.match(/#(\d+)/)?.[1] || 0)
@@ -181,12 +181,14 @@ export default function TeacherMonitor() {
           }
           if (e.type === 'note')      studentMap[e.student_name].notes += 1
           if (e.type === 'submitted') studentMap[e.student_name].submitted = true
+          if (e.type === 'paused')    studentMap[e.student_name].paused = true
+          if (e.type === 'resumed')   studentMap[e.student_name].paused = false
           if (e.type === 'joined' && e.detail?.startsWith('IP ')) studentMap[e.student_name].ip = e.detail.slice(3)
         }
         // Also mark submitted from submissions table
         for (const s of subs) {
           if (!studentMap[s.student_name]) {
-            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true, ip: s.ip || null }
+            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true, ip: s.ip || null, paused: false }
           } else {
             studentMap[s.student_name].submitted = true
             studentMap[s.student_name].violations = Math.max(studentMap[s.student_name].violations, s.violations)
@@ -215,9 +217,15 @@ export default function TeacherMonitor() {
     socket.on('student_joined', ({ student_name, ip }) => {
       setStudents(s => s.find(x => x.name === student_name)
         ? s.map(x => x.name === student_name ? { ...x, ip: x.ip || ip || null } : x)
-        : [...s, { name: student_name, violations: 0, notes: 0, submitted: false, ip: ip || null }])
+        : [...s, { name: student_name, violations: 0, notes: 0, submitted: false, ip: ip || null, paused: false }])
       addLog(`${student_name} joined${ip ? ` (${ip})` : ''}`, 'info')
       appendEvent(student_name, 'joined', ip ? `IP ${ip}` : null)
+    })
+
+    socket.on('pause_state', ({ student_name, paused, at }) => {
+      setStudents(s => s.map(x => x.name === student_name ? { ...x, paused } : x))
+      addLog(`${student_name} ${paused ? 'paused (break)' : 'resumed'}`, 'info')
+      appendEvent(student_name, paused ? 'paused' : 'resumed', null, at)
     })
 
     socket.on('student_left', ({ student_name }) => {
@@ -264,6 +272,10 @@ export default function TeacherMonitor() {
     setEvents(ev => [...ev, { session_id: sidRef.current, student_name, type, detail, at }])
   }
 
+  function togglePause(student_name, paused) {
+    socketRef.current?.emit('set_pause', { session_id: sidRef.current, student_name, paused })
+  }
+
   const examUrl = `${window.location.origin}/student`
 
   return (
@@ -302,10 +314,22 @@ export default function TeacherMonitor() {
                     {s.notes > 0 && (
                       <span className="badge badge-blue">📋 {s.notes} copy/paste</span>
                     )}
+                    {s.paused && !s.submitted && (
+                      <span className="badge badge-yellow">⏸️ On break</span>
+                    )}
                     {s.submitted
                       ? <span className="badge badge-green">Submitted</span>
                       : <span className="badge badge-blue">In Progress</span>
                     }
+                    {!s.submitted && (
+                      <button
+                        className="btn-ghost"
+                        style={{ padding: '0.2rem 0.6rem', fontSize: '0.8125rem' }}
+                        onClick={() => togglePause(s.name, !s.paused)}
+                      >
+                        {s.paused ? 'Resume' : 'Pause'}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
