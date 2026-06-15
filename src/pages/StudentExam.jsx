@@ -48,6 +48,20 @@ function DrawingAnswer({ value, onChange }) {
   )
 }
 
+// Props that turn off browser/extension writing aids on answer fields.
+// Grammarly and similar editor extensions honor these data attributes and
+// will NOT attach their (generative-AI) UI to fields that carry them; the
+// rest disable native spellcheck/autocomplete/autocorrect suggestions.
+const noAssistProps = {
+  spellCheck: false,
+  autoComplete: 'off',
+  autoCorrect: 'off',
+  autoCapitalize: 'off',
+  'data-gramm': 'false',
+  'data-gramm_editor': 'false',
+  'data-enable-grammarly': 'false',
+}
+
 export default function StudentExam() {
   const nav = useNavigate()
   const [exam, setExam] = useState(null)
@@ -262,6 +276,7 @@ export default function StudentExam() {
                 onChange={e => setAnswer(q.id, e.target.value)}
                 placeholder="Your answer..."
                 className={styles.shortInput}
+                {...noAssistProps}
               />
             )}
 
@@ -272,6 +287,7 @@ export default function StudentExam() {
                 onChange={e => setAnswer(q.id, e.target.value)}
                 placeholder="Write your answer here..."
                 className={styles.essayInput}
+                {...noAssistProps}
               />
             )}
 
