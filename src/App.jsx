@@ -36,6 +36,7 @@ export default function App() {
         <Route path="/teacher" element={<ProtectedTeacher><TeacherDashboard /></ProtectedTeacher>} />
         <Route path="/teacher/exam/new" element={<ProtectedTeacher><TeacherExamBuilder /></ProtectedTeacher>} />
         <Route path="/teacher/exam/:id/edit" element={<ProtectedTeacher><TeacherExamBuilder /></ProtectedTeacher>} />
+        <Route path="/teacher/exam/:id/preview" element={<ProtectedTeacher><StudentExam /></ProtectedTeacher>} />
         <Route path="/teacher/exam/:id/monitor" element={<ProtectedTeacher><TeacherMonitor /></ProtectedTeacher>} />
         <Route path="/admin" element={<ProtectedAdmin><AdminDashboard /></ProtectedAdmin>} />
         <Route path="/student" element={<StudentJoin />} />

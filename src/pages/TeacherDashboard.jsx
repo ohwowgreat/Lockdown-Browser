@@ -91,6 +91,9 @@ export default function TeacherDashboard() {
                 >
                   {exam.is_active ? 'Close Exam' : 'Open Exam'}
                 </button>
+                <button className="btn-ghost" onClick={() => nav(`/teacher/exam/${exam.id}/preview`)}>
+                  Preview
+                </button>
                 <button className="btn-ghost" onClick={() => viewResults(exam)}>
                   View Results
                 </button>

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { ReactSketchCanvas } from 'react-sketch-canvas'
 import { useLockdown } from '../hooks/useLockdown'
 import { useDesmos } from '../hooks/useDesmos'
+import { useAuth } from '../context/AuthContext'
 import styles from './StudentExam.module.css'
 
 const CALC_LABELS = { scientific: 'Scientific Calculator', graphing: 'Graphing Calculator' }
@@ -110,6 +111,11 @@ const noAssistProps = {
 
 export default function StudentExam() {
   const nav = useNavigate()
+  // When mounted at /teacher/exam/:id/preview, render the exam exactly as a
+  // student sees it but with no lockdown, no socket/session, and no submission.
+  const { id: previewId } = useParams()
+  const preview = Boolean(previewId)
+  const { authHeaders } = useAuth()
   const [exam, setExam] = useState(null)
   const [studentName, setStudentName] = useState('')
   const [sessionId, setSessionId] = useState(null)
@@ -132,8 +138,22 @@ export default function StudentExam() {
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
   }, [])
 
+  // Preview: load the exam straight from the API (teacher-authed). No session.
+  useEffect(() => {
+    if (!preview) return
+    fetch(`/api/exams/${previewId}`, { headers: authHeaders() })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error('not found'))))
+      .then(data => {
+        setExam(data)
+        setStudentName('Preview')
+        if (data.time_limit > 0) setTimeLeft(data.time_limit * 60)
+      })
+      .catch(() => nav('/teacher'))
+  }, [preview, previewId, nav])
+
   // Load from sessionStorage
   useEffect(() => {
+    if (preview) return
     const e = sessionStorage.getItem('exam')
     const n = sessionStorage.getItem('studentName')
     const s = sessionStorage.getItem('sessionId')
@@ -182,7 +202,7 @@ export default function StudentExam() {
   const { violations, warningMsg, requestFullscreen, isFullscreen, awayBlocked, setAwayBlocked, paused } = useLockdown({
     sessionId,
     studentName,
-    enabled: Boolean(exam && !submitted),
+    enabled: Boolean(exam && !submitted && !preview),
     settings: exam?.settings,
   })
 
@@ -231,8 +251,19 @@ export default function StudentExam() {
 
   return (
     <div className={styles.wrap}>
+      {/* Preview banner — teacher viewing the exam as a student. No lockdown,
+          no submission; answers here are not saved. */}
+      {preview && (
+        <div className={styles.previewBar}>
+          👁 Preview mode — this is how students see the exam. Nothing is saved or submitted.
+          <button className="btn-primary" onClick={() => nav('/teacher')} style={{ marginLeft: '0.75rem', padding: '0.25rem 0.75rem' }}>
+            Exit Preview
+          </button>
+        </div>
+      )}
+
       {/* Offline banner — reassures the student their work is saved locally */}
-      {!online && !submitted && (
+      {!online && !submitted && !preview && (
         <div className={styles.offlineBar}>
           ⚠️ You’re offline — keep working. Your answers are saved on this device and will submit once you reconnect.
         </div>
@@ -270,7 +301,7 @@ export default function StudentExam() {
       )}
 
       {/* Fullscreen nudge */}
-      {!isFullscreen && !submitted && (
+      {!isFullscreen && !submitted && !preview && (
         <div className={styles.fsBar}>
           Exam should be fullscreen.
           <button onClick={requestFullscreen} className="btn-primary" style={{ marginLeft: '0.75rem', padding: '0.25rem 0.75rem' }}>
@@ -280,7 +311,7 @@ export default function StudentExam() {
       )}
 
       {/* Name watermark — deters screenshot/photo sharing */}
-      {studentName && <div className={styles.nameWatermark} aria-hidden="true">{studentName}</div>}
+      {studentName && !preview && <div className={styles.nameWatermark} aria-hidden="true">{studentName}</div>}
 
       <header className={styles.header}>
         <div className={styles.examTitle}>{exam.title}</div>
@@ -351,15 +382,21 @@ export default function StudentExam() {
         ))}
 
         <div className={styles.submitRow}>
-          <button
-            className={`btn-primary ${styles.submitBtn}`}
-            onClick={submitExam}
-            disabled={submitting}
-          >
-            {submitting
-              ? (online ? 'Submitting…' : 'Waiting for connection — answers saved…')
-              : `Submit Exam (${answered}/${total} answered)`}
-          </button>
+          {preview ? (
+            <button className={`btn-ghost ${styles.submitBtn}`} onClick={() => nav('/teacher')}>
+              Exit Preview
+            </button>
+          ) : (
+            <button
+              className={`btn-primary ${styles.submitBtn}`}
+              onClick={submitExam}
+              disabled={submitting}
+            >
+              {submitting
+                ? (online ? 'Submitting…' : 'Waiting for connection — answers saved…')
+                : `Submit Exam (${answered}/${total} answered)`}
+            </button>
+          )}
         </div>
       </main>
     </div>

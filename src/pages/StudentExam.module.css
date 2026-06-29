@@ -46,6 +46,21 @@
   text-align: center;
 }
 
+.previewBar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.5rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .header {
   display: flex;
   align-items: center;
