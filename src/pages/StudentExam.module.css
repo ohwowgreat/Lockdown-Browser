@@ -263,3 +263,27 @@
   padding: 0.875rem 2.5rem;
   font-size: 1rem;
 }
+
+.calcWrap {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.calcGraphing {
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.calcScientific {
+  width: 100%;
+  max-width: 360px;
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}

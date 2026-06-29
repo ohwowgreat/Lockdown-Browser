@@ -11,8 +11,14 @@ const QUESTION_TYPES = [
   { value: 'drawing',         label: 'Drawing' },
 ]
 
+const CALC_OPTIONS = [
+  { value: 'none',       label: '🚫 No calculator' },
+  { value: 'scientific', label: '🧮 Scientific' },
+  { value: 'graphing',   label: '🧮 Graphing' },
+]
+
 function emptyQuestion() {
-  return { id: uuid(), type: 'multiple_choice', text: '', options: ['', '', '', ''], correct: 0, image: null }
+  return { id: uuid(), type: 'multiple_choice', text: '', options: ['', '', '', ''], correct: 0, image: null, calculator: 'none' }
 }
 
 function ImageUpload({ value, onChange, authHeaders }) {
@@ -243,6 +249,14 @@ export default function TeacherExamBuilder() {
               <span className={styles.qNum}>Q{idx + 1}</span>
               <select value={q.type} onChange={e => updateQuestion(q.id, { type: e.target.value })} style={{ width: 'auto' }}>
                 {QUESTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+              <select
+                value={q.calculator || 'none'}
+                onChange={e => updateQuestion(q.id, { calculator: e.target.value })}
+                style={{ width: 'auto' }}
+                title="Calculator available to students for this question"
+              >
+                {CALC_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
               <div className={styles.qActions}>
                 <button className="btn-ghost" disabled={idx === 0} onClick={() => moveQuestion(idx, -1)}>↑</button>

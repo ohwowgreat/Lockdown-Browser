@@ -2,7 +2,53 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ReactSketchCanvas } from 'react-sketch-canvas'
 import { useLockdown } from '../hooks/useLockdown'
+import { useDesmos } from '../hooks/useDesmos'
 import styles from './StudentExam.module.css'
+
+const CALC_LABELS = { scientific: 'Scientific Calculator', graphing: 'Graphing Calculator' }
+
+function CalculatorPanel({ type }) {
+  const { ready, error } = useDesmos()
+  const elRef = useRef(null)
+  const calcRef = useRef(null)
+
+  useEffect(() => {
+    if (!ready || !elRef.current) return
+    const Desmos = window.Desmos
+    try {
+      calcRef.current = type === 'graphing'
+        ? Desmos.GraphingCalculator(elRef.current, { settingsMenu: false })
+        : Desmos.ScientificCalculator(elRef.current)
+    } catch (e) {
+      // e.g. calculator type not enabled on the API key
+    }
+    return () => { calcRef.current?.destroy?.(); calcRef.current = null }
+  }, [ready, type])
+
+  if (error) return <p className={styles.drawingSaved} style={{ color: 'var(--muted)' }}>Calculator unavailable (couldn’t load).</p>
+  return (
+    <div>
+      {!ready && <p className={styles.drawingSaved} style={{ color: 'var(--muted)' }}>Loading calculator…</p>}
+      <div ref={elRef} className={type === 'graphing' ? styles.calcGraphing : styles.calcScientific} />
+    </div>
+  )
+}
+
+function QuestionCalculator({ type }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={styles.calcWrap}>
+      <button
+        className="btn-ghost"
+        onClick={() => setOpen(o => !o)}
+        style={{ fontSize: '0.8125rem' }}
+      >
+        🧮 {open ? 'Hide' : 'Open'} {CALC_LABELS[type] || 'Calculator'}
+      </button>
+      {open && <CalculatorPanel type={type} />}
+    </div>
+  )
+}
 
 function DrawingAnswer({ value, onChange }) {
   const canvasRef = useRef(null)
@@ -296,6 +342,10 @@ export default function StudentExam() {
                 value={answers[q.id]}
                 onChange={val => setAnswer(q.id, val)}
               />
+            )}
+
+            {q.calculator && q.calculator !== 'none' && (
+              <QuestionCalculator type={q.calculator} />
             )}
           </div>
         ))}
