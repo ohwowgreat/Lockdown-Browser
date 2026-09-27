@@ -265,18 +265,51 @@ app.delete('/api/exams/:id', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+// True once anyone has joined or submitted in this sitting.
+const sessionHasActivity = db.prepare(`
+  SELECT (SELECT COUNT(*) FROM submissions WHERE session_id = ?) +
+         (SELECT COUNT(*) FROM events WHERE session_id = ?) AS n
+`)
+
 app.patch('/api/exams/:id/active', requireAuth, (req, res) => {
   const { is_active } = req.body
   const exam = db.prepare('SELECT * FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
   if (!exam) return res.status(404).json({ error: 'Not found' })
   let sessionId = exam.active_session_id
-  if (!sessionId) {
-    sessionId = uuid()
-    db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, req.params.id, Date.now())
-    db.prepare('UPDATE exams SET active_session_id = ? WHERE id = ?').run(sessionId, req.params.id)
+  const opening = is_active && !exam.is_active
+  const closing = !is_active && exam.is_active
+  if (opening) {
+    // Each opening is a sitting. If the current sitting already saw activity,
+    // start a fresh one so two sittings never merge into one result set. An
+    // unused sitting is simply reused.
+    const used = sessionId ? sessionHasActivity.get(sessionId, sessionId).n > 0 : false
+    if (!sessionId || used) {
+      sessionId = uuid()
+      db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, exam.id, Date.now())
+      db.prepare('UPDATE exams SET active_session_id = ? WHERE id = ?').run(sessionId, exam.id)
+    } else {
+      db.prepare('UPDATE sessions SET ended_at = NULL WHERE id = ?').run(sessionId)
+    }
+  } else if (closing && sessionId) {
+    db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(Date.now(), sessionId)
   }
-  db.prepare('UPDATE exams SET is_active = ? WHERE id = ?').run(is_active ? 1 : 0, req.params.id)
+  db.prepare('UPDATE exams SET is_active = ? WHERE id = ?').run(is_active ? 1 : 0, exam.id)
   res.json({ ok: true, session_id: sessionId })
+})
+
+// Every sitting of an exam, newest first, with headline counts.
+app.get('/api/exams/:id/sessions', requireAuth, (req, res) => {
+  const exam = db.prepare('SELECT id, active_session_id FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
+  if (!exam) return res.status(404).json({ error: 'Not found' })
+  const rows = db.prepare(`
+    SELECT s.id, s.started_at, s.ended_at,
+      (SELECT COUNT(*) FROM submissions WHERE session_id = s.id) AS submission_count,
+      (SELECT COUNT(DISTINCT student_name) FROM events WHERE session_id = s.id AND type = 'joined') AS student_count
+    FROM sessions s
+    WHERE s.exam_id = ?
+    ORDER BY s.started_at DESC
+  `).all(exam.id)
+  res.json(rows.map(r => ({ ...r, is_current: r.id === exam.active_session_id })))
 })
 
 // ── Student-facing routes (no auth) ──────────────────────────────────────────

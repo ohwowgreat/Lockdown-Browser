@@ -141,10 +141,11 @@ function SubmissionCard({ sub, exam, events }) {
 export default function TeacherMonitor() {
   const nav = useNavigate()
   const { id: examId } = useParams()
-  const [params] = useSearchParams()
+  const [params, setSearchParams] = useSearchParams()
   const { authHeaders, getToken } = useAuth()
 
   const [exam, setExam] = useState(null)
+  const [sessions, setSessions] = useState([])  // every sitting of this exam, newest first
   const [sid, setSid] = useState(null)          // resolved session id
   const [students, setStudents] = useState([])
   const [submissions, setSubmissions] = useState([])
@@ -167,6 +168,23 @@ export default function TeacherMonitor() {
         sidRef.current = resolved
       })
   }, [examId])
+
+  function loadSessions() {
+    fetch(`/api/exams/${examId}/sessions`, { headers: authHeaders() })
+      .then(r => (r.ok ? r.json() : []))
+      .then(setSessions)
+  }
+  useEffect(loadSessions, [examId])
+
+  // Viewing a different sitting: the socket effect below reconnects on sid.
+  function switchSession(nextSid) {
+    if (!nextSid || nextSid === sid) return
+    setStudents([]); setSubmissions([]); setEvents([]); setLog([])
+    setSid(nextSid)
+    sidRef.current = nextSid
+    setSearchParams({ session: nextSid })
+  }
+  const isCurrentSitting = !exam || !sid || sid === exam.active_session_id
 
   // Phase 2 — once we have a real session id, load data + connect socket
   useEffect(() => {
@@ -290,6 +308,7 @@ export default function TeacherMonitor() {
     })
 
     socket.on('submission', ({ student_name, violations, answers, ip, submitted_at }) => {
+      loadSessions()
       setStudents(s => s.map(x => x.name === student_name ? { ...x, submitted: true, ip: x.ip || ip || null } : x))
       setSubmissions(prev => {
         if (prev.find(p => p.student_name === student_name)) return prev
@@ -348,6 +367,22 @@ export default function TeacherMonitor() {
         <button className="btn-ghost" onClick={() => nav('/teacher')}>← Dashboard</button>
         <h1>{exam?.title ?? 'Loading...'}</h1>
         <div className={styles.sessionInfo}>
+          {sessions.length > 1 && (
+            <select
+              aria-label="Sitting"
+              className={styles.sittingPicker}
+              value={sid || ''}
+              onChange={e => switchSession(e.target.value)}
+            >
+              {sessions.map((s, i) => (
+                <option key={s.id} value={s.id}>
+                  Sitting {sessions.length - i} · {new Date(s.started_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                  {' · '}{s.submission_count} submission{s.submission_count !== 1 ? 's' : ''}{s.is_current ? ' · current' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          {!isCurrentSitting && <span className={`${styles.sessionLabel} ${styles.sessionClosed}`}>Past sitting</span>}
           <span className={styles.code}>{exam?.code}</span>
           <span className={`${styles.sessionLabel} ${exam?.is_active ? styles.sessionOpen : styles.sessionClosed}`}>
             {exam?.is_active ? '● Open' : '○ Closed'}
@@ -391,7 +426,7 @@ export default function TeacherMonitor() {
                       ? <span className="badge badge-green">Submitted</span>
                       : <span className="badge badge-blue">In Progress</span>
                     }
-                    {!s.submitted && (
+                    {!s.submitted && isCurrentSitting && (
                       <button
                         className="btn-ghost"
                         style={{ padding: '0.2rem 0.6rem', fontSize: '0.8125rem' }}

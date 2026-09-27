@@ -19,7 +19,14 @@
   font-weight: 700;
 }
 
-.sessionInfo { display: flex; align-items: center; gap: 0.75rem; }
+.sessionInfo { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+
+.sittingPicker {
+  width: auto;
+  max-width: 340px;
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.625rem;
+}
 
 .code {
   font-size: 1.25rem;
