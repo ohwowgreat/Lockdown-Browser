@@ -120,7 +120,8 @@ export default function StudentExam() {
   const [studentName, setStudentName] = useState('')
   const [sessionId, setSessionId] = useState(null)
   const [answers, setAnswers] = useState({})
-  const [timeLeft, setTimeLeft] = useState(null)
+  const [deadline, setDeadline] = useState(null)   // epoch ms when time is up
+  const [timeLeft, setTimeLeft] = useState(null)   // whole seconds, for display
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine)
@@ -128,6 +129,9 @@ export default function StudentExam() {
   // Where answers are mirrored locally so a dropped connection, refresh, or
   // crash never loses work. Keyed per session+student.
   const answersKey = sessionId && studentName ? `ld_answers:${sessionId}:${studentName}` : null
+  // When this student first opened the exam, so a refresh resumes the same
+  // countdown instead of restarting it.
+  const startKey = sessionId && studentName ? `ld_start:${sessionId}:${studentName}` : null
 
   // Track connectivity so we can show the student whether their work is syncing.
   useEffect(() => {
@@ -146,7 +150,7 @@ export default function StudentExam() {
       .then(data => {
         setExam(data)
         setStudentName('Preview')
-        if (data.time_limit > 0) setTimeLeft(data.time_limit * 60)
+        if (data.time_limit > 0) setDeadline(Date.now() + data.time_limit * 60 * 1000)
       })
       .catch(() => nav('/teacher'))
   }, [preview, previewId, nav])
@@ -167,12 +171,19 @@ export default function StudentExam() {
     if (!activeSession) { nav('/student'); return }
     setSessionId(activeSession)
     sessionStorage.setItem('sessionId', activeSession)
-
-    // Timer
-    if (parsed.time_limit > 0) {
-      setTimeLeft(parsed.time_limit * 60)
-    }
   }, [nav])
+
+  // Timer: anchor the deadline to the first time this student opened the exam.
+  useEffect(() => {
+    if (preview || !exam || !startKey || !(exam.time_limit > 0)) return
+    let start = 0
+    try { start = Number(localStorage.getItem(startKey)) || 0 } catch (_) {}
+    if (!start) {
+      start = Date.now()
+      try { localStorage.setItem(startKey, String(start)) } catch (_) {}
+    }
+    setDeadline(start + exam.time_limit * 60 * 1000)
+  }, [preview, exam, startKey])
 
   // Restore any locally-saved answers (e.g. after an accidental refresh while
   // offline) once we know which session/student this is.
@@ -191,13 +202,14 @@ export default function StudentExam() {
     try { localStorage.setItem(answersKey, JSON.stringify(answers)) } catch (_) {}
   }, [answers, answersKey, submitted])
 
-  // Countdown timer
+  // Countdown display, derived from the deadline so it never drifts.
   useEffect(() => {
-    if (timeLeft === null || submitted) return
-    if (timeLeft <= 0) { submitExam(); return }
-    const t = setTimeout(() => setTimeLeft(t => t - 1), 1000)
-    return () => clearTimeout(t)
-  }, [timeLeft, submitted])
+    if (deadline === null || submitted) return
+    const tick = () => setTimeLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
+    tick()
+    const t = setInterval(tick, 500)
+    return () => clearInterval(t)
+  }, [deadline, submitted])
 
   const { violations, warningMsg, requestFullscreen, isFullscreen, awayBlocked, setAwayBlocked, paused } = useLockdown({
     sessionId,
@@ -227,12 +239,20 @@ export default function StudentExam() {
       }
     }
     setSubmitted(true)
-    if (answersKey) { try { localStorage.removeItem(answersKey) } catch (_) {} }
+    try {
+      if (answersKey) localStorage.removeItem(answersKey)
+      if (startKey) localStorage.removeItem(startKey)
+    } catch (_) {}
     // Exit fullscreen
     if (document.exitFullscreen) document.exitFullscreen()
     sessionStorage.clear()
     nav('/student/done')
-  }, [submitting, submitted, sessionId, studentName, answers, violations, answersKey, nav])
+  }, [submitting, submitted, sessionId, studentName, answers, violations, answersKey, startKey, nav])
+
+  // Time is up: submit whatever is there.
+  useEffect(() => {
+    if (timeLeft === 0 && !submitted && !preview) submitExam()
+  }, [timeLeft, submitted, preview, submitExam])
 
   function setAnswer(qid, value) {
     setAnswers(a => ({ ...a, [qid]: value }))

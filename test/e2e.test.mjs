@@ -77,6 +77,31 @@ try {
   t.check('monitor shows the On break badge', await visible(monitor.getByText('On break')))
   await monitor.getByRole('button', { name: 'Resume' }).click()
   t.check('student overlay clears on resume', await hidden(student.getByText(/paused by your teacher/)))
+
+  t.section('Countdown survives a reload')
+  const timed = await createOpenExam(a, token, { title: 'Timed Exam', time_limit: 10 })
+  const timedCtx = await browser.newContext()
+  const tp = await timedCtx.newPage()
+  tp.on('dialog', d => d.accept())   // the leave-page prompt on reload
+  await tp.goto(B + '/student')
+  await tp.getByPlaceholder('First and Last Name').fill('Tim')
+  await tp.getByPlaceholder(/e\.g\./).fill(timed.code)
+  await tp.getByRole('button', { name: /Join Exam/ }).click()
+  await tp.waitForURL(/\/student\/exam/, { timeout: 10000 })
+  const readTimer = async () => {
+    const txt = await tp.locator('[class*="timer"]').first().innerText()
+    const m = txt.match(/(\d+):(\d\d)/)
+    return m ? Number(m[1]) * 60 + Number(m[2]) : NaN
+  }
+  await tp.locator('[class*="timer"]').first().waitFor({ timeout: 5000 })
+  await tp.waitForTimeout(2500)
+  const before = await readTimer()
+  await tp.reload()
+  await tp.locator('[class*="timer"]').first().waitFor({ timeout: 10000 })
+  const after = await readTimer()
+  t.check('timer had started counting before reload', before < 600 && before > 590, String(before))
+  t.check('timer did not reset on reload', after <= before && after > 580, `before=${before} after=${after}`)
+  await timedCtx.close()
 } finally {
   await browser.close()
   await srv.stop()

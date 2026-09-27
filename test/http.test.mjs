@@ -1,7 +1,7 @@
 // HTTP-level checks: student payload shape, session ownership, CSV export.
-import { startServer, checker, api, registerTeacher, createOpenExam, MC, SHORT } from './lib.mjs'
+import { startServer, checker, api, registerTeacher, createOpenExam, loginAdmin, MC, SHORT } from './lib.mjs'
 
-const srv = await startServer()
+const srv = await startServer({ admin: true })
 const a = api(srv.base)
 const t = checker()
 try {
@@ -43,6 +43,33 @@ try {
   t.check('CSV has the score column', csv.text.includes('"1/1"'))
   t.check('CSV filename comes from the exam title', /filename="Smoke_Exam_results\.csv"/.test(csv.headers.get('content-disposition') || ''))
   t.check('CSV includes the short answer', csv.text.includes('"blue"'))
+
+  t.section('Submissions are idempotent per student')
+  const again = await a.post('/api/submissions', { session_id: SID, student_name: 'Ada', answers: { q1: 0 }, violations: 3 })
+  t.check('repeat returns the original id', again.status === 200 && again.body?.id === sub.body.id, JSON.stringify(again.body))
+  t.check('repeat is marked duplicate', again.body?.duplicate === true)
+  const { body: subs } = await a.get(`/api/sessions/${SID}/submissions`, T1)
+  t.check('only one row stored', subs.length === 1, String(subs.length))
+  t.check('first answers kept', subs[0].answers.q1 === 1)
+  const { body: events } = await a.get(`/api/sessions/${SID}/events`, T1)
+  t.check('duplicate attempt is logged for the teacher', events.some(e => e.type === 'duplicate_submission' && e.student_name === 'Ada'))
+  t.check('missing fields rejected', (await a.post('/api/submissions', { answers: {} })).status === 400)
+
+  t.section('Suspension takes effect immediately')
+  const ADMIN_TOKEN = await loginAdmin(a)
+  const { body: teachers } = await a.get('/api/admin/teachers', ADMIN_TOKEN)
+  const t2 = teachers.find(x => x.email === 't2@x.com')
+  t.check('T2 works before suspension', (await a.get('/api/exams', T2)).status === 200)
+  await a.patch(`/api/admin/teachers/${t2.id}/suspend`, { is_suspended: true }, ADMIN_TOKEN)
+  const suspended = await a.get('/api/exams', T2)
+  t.check('suspended teacher gets 403 with existing token', suspended.status === 403, String(suspended.status))
+  t.check('suspended teacher fails /me, so the client logs out', (await a.get('/api/auth/me', T2)).status === 403)
+  t.check('suspended teacher cannot log in', (await a.post('/api/auth/login', { email: 't2@x.com', password: 'pw' })).status === 403)
+  await a.patch(`/api/admin/teachers/${t2.id}/suspend`, { is_suspended: false }, ADMIN_TOKEN)
+  t.check('unsuspend restores access', (await a.get('/api/exams', T2)).status === 200)
+  await a.del(`/api/admin/teachers/${t2.id}`, ADMIN_TOKEN)
+  t.check('deleted teacher token gets 401', (await a.get('/api/exams', T2)).status === 401)
+  t.check('owner unaffected', (await a.get('/api/exams', T1)).status === 200)
 } finally {
   await srv.stop()
 }

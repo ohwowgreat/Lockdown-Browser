@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import fs from 'fs'
-import { signToken, verifyToken, requireAuth, requireAdmin } from './auth.js'
+import { signToken, configureAuth, teacherFromToken, requireAuth, requireAdmin } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -98,6 +98,20 @@ try { db.exec(`ALTER TABLE exams ADD COLUMN settings TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_admin INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_suspended INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE submissions ADD COLUMN ip TEXT`) } catch (_) {}
+// One submission per student per session. Best effort: on a legacy database
+// that already holds duplicates the index cannot be built, and the submission
+// handler below still refuses new duplicates.
+try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS submissions_one_per_student ON submissions (session_id, student_name)`) } catch (_) {}
+
+// Let auth refuse tokens for teachers who were suspended or deleted after login.
+const selectTeacherStatus = db.prepare('SELECT is_suspended FROM teachers WHERE id = ?')
+configureAuth({
+  isBlocked: id => {
+    const t = selectTeacherStatus.get(id)
+    if (!t) return 'deleted'
+    return t.is_suspended ? 'suspended' : false
+  },
+})
 
 // ── Seed superadmin ───────────────────────────────────────────────────────────
 async function seedAdmin() {
@@ -127,6 +141,13 @@ const insertEvent = db.prepare(
 )
 function logEvent(session_id, student_name, type, detail = null) {
   insertEvent.run(uuid(), session_id, student_name, type, detail, Date.now())
+}
+
+// Server-side observation about a student that the monitor should show.
+// Logged under its own type and forwarded to the session's teachers.
+function flagStudent(session_id, student_name, type, detail) {
+  logEvent(session_id, student_name, type, detail)
+  io.to(teacherRoom(session_id)).emit('student_flag', { student_name, type, detail, at: Date.now() })
 }
 
 function generateCode() {
@@ -245,10 +266,19 @@ app.get('/api/exams/code/:code', (req, res) => {
 
 app.post('/api/submissions', (req, res) => {
   const { session_id, student_name, answers, violations } = req.body
+  if (!session_id || !student_name) return res.status(400).json({ error: 'session_id and student_name are required' })
+  // First submission stands. The client retries until it gets a success, so a
+  // repeat after a lost response must succeed with the original id. A second
+  // attempt after a refresh is worth the teacher's attention, so it is logged.
+  const existing = db.prepare('SELECT id FROM submissions WHERE session_id = ? AND student_name = ?').get(session_id, student_name)
+  if (existing) {
+    flagStudent(session_id, student_name, 'duplicate_submission', 'Second submission ignored; first one kept')
+    return res.json({ id: existing.id, duplicate: true })
+  }
   const id = uuid()
   const ip = req.ip || null
   db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations, ip) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, session_id, student_name, JSON.stringify(answers), violations || 0, ip)
+    .run(id, session_id, student_name, JSON.stringify(answers || {}), violations || 0, ip)
   logEvent(session_id, student_name, 'submitted')
   io.to(teacherRoom(session_id)).emit('submission', { id, student_name, violations, answers, ip, submitted_at: Date.now() })
   res.json({ id })
@@ -411,8 +441,7 @@ io.on('connection', (socket) => {
   // Teacher monitor joining a session's live feed. Needs the teacher's JWT and
   // ownership of the session's exam; otherwise the socket joins nothing.
   socket.on('join_session', ({ session_id, token } = {}) => {
-    let teacher = null
-    try { teacher = token ? verifyToken(token) : null } catch { teacher = null }
+    const teacher = teacherFromToken(token)
     const session = teacher && session_id ? selectOwnedSession.get(session_id, teacher.id) : null
     if (!session) {
       socket.emit('join_denied', { session_id })
@@ -421,23 +450,38 @@ io.on('connection', (socket) => {
     socket.join(teacherRoom(session_id))
   })
 
-  socket.on('student_join', ({ session_id, student_name }) => {
-    socket.join(studentRoom(session_id))
-    socket.data.session_id = session_id
-    socket.data.student_name = student_name
-    const ip = socketIp(socket)
-    logEvent(session_id, student_name, 'joined', ip ? `IP ${ip}` : null)
-    io.to(teacherRoom(session_id)).emit('student_joined', { id: socket.id, student_name, ip, joined_at: Date.now() })
+  // Students identify themselves in the connection handshake, so the identity
+  // is fixed before any event arrives (including events buffered while
+  // offline) and nothing in an event payload can name another student.
+  // Unknown sessions are ignored.
+  const auth = socket.handshake.auth || {}
+  if (auth.role === 'student') {
+    const session_id = String(auth.session_id || '')
+    const student_name = String(auth.student_name || '').trim().slice(0, 80)
+    const known = session_id && db.prepare('SELECT id FROM sessions WHERE id = ?').get(session_id)
+    if (known && student_name) {
+      socket.join(studentRoom(session_id))
+      socket.data.session_id = session_id
+      socket.data.student_name = student_name
+      const ip = socketIp(socket)
+      logEvent(session_id, student_name, 'joined', ip ? `IP ${ip}` : null)
+      io.to(teacherRoom(session_id)).emit('student_joined', { id: socket.id, student_name, ip, joined_at: Date.now() })
+    }
+  }
+  // The identity the handshake established, or null for a socket that is not
+  // a joined student. Student events are dropped without it.
+  const student = () => (socket.data.session_id && socket.data.student_name ? socket.data : null)
+
+  socket.on('violation', ({ count } = {}) => {
+    const s = student(); if (!s) return
+    logEvent(s.session_id, s.student_name, 'violation', `#${count} – switched away from exam`)
+    io.to(teacherRoom(s.session_id)).emit('student_violation', { student_name: s.student_name, count, at: Date.now() })
   })
 
-  socket.on('violation', ({ session_id, student_name, count }) => {
-    logEvent(session_id, student_name, 'violation', `#${count} – switched away from exam`)
-    io.to(teacherRoom(session_id)).emit('student_violation', { student_name, count, at: Date.now() })
-  })
-
-  socket.on('note', ({ session_id, student_name, action }) => {
-    logEvent(session_id, student_name, 'note', action)
-    io.to(teacherRoom(session_id)).emit('student_note', { student_name, action, at: Date.now() })
+  socket.on('note', ({ action } = {}) => {
+    const s = student(); if (!s) return
+    logEvent(s.session_id, s.student_name, 'note', String(action || ''))
+    io.to(teacherRoom(s.session_id)).emit('student_note', { student_name: s.student_name, action, at: Date.now() })
   })
 
   // Teacher pauses/resumes a specific student (e.g. bathroom break). Honoured
@@ -451,11 +495,12 @@ io.on('connection', (socket) => {
       .emit('pause_state', { student_name, paused: !!paused, at: Date.now() })
   })
 
-  socket.on('keystrokes', ({ session_id, student_name, keys }) => {
-    if (!keys?.length) return
+  socket.on('keystrokes', ({ keys } = {}) => {
+    const s = student(); if (!s) return
+    if (!Array.isArray(keys) || !keys.length) return
     const detail = keys.map(k => k.key).join(', ')
-    logEvent(session_id, student_name, 'keystrokes', detail)
-    io.to(teacherRoom(session_id)).emit('student_keystrokes', { student_name, keys, at: Date.now() })
+    logEvent(s.session_id, s.student_name, 'keystrokes', detail)
+    io.to(teacherRoom(s.session_id)).emit('student_keystrokes', { student_name: s.student_name, keys, at: Date.now() })
   })
 
   socket.on('disconnect', () => {

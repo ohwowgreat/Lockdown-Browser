@@ -46,10 +46,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     const count = violationsRef.current
     setViolations(count)
     warn(`⚠️ Violation #${count}: ${reason}`)
-    const sid = sessionIdRef.current, sname = studentNameRef.current
-    if (socketRef.current && sid && sname) {
-      socketRef.current.emit('violation', { session_id: sid, student_name: sname, count })
-    }
+    if (socketRef.current) socketRef.current.emit('violation', { count })
   }, [warn])
 
   // ── Away-episode tracking ──────────────────────────────────────────────────
@@ -79,18 +76,12 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   useEffect(() => () => { if (awayTimerRef.current) clearTimeout(awayTimerRef.current) }, [])
 
   const recordNote = useCallback((action) => {
-    const sid = sessionIdRef.current, sname = studentNameRef.current
-    if (socketRef.current && sid && sname) {
-      socketRef.current.emit('note', { session_id: sid, student_name: sname, action })
-    }
+    if (socketRef.current) socketRef.current.emit('note', { action })
   }, [])
 
   const flushKeystrokes = useCallback(() => {
     if (!keystrokeBuffer.current.length) return
-    const sid = sessionIdRef.current, sname = studentNameRef.current
-    if (socketRef.current && sid && sname) {
-      socketRef.current.emit('keystrokes', { session_id: sid, student_name: sname, keys: [...keystrokeBuffer.current] })
-    }
+    if (socketRef.current) socketRef.current.emit('keystrokes', { keys: [...keystrokeBuffer.current] })
     keystrokeBuffer.current = []
   }, [])
 
@@ -103,11 +94,10 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   // ── Socket ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!enabled || !sessionId) return
-    const socket = io()
+    // Identity travels in the handshake so it is bound before any event,
+    // including ones buffered while offline, and re-sent on every reconnect.
+    const socket = io({ auth: { role: 'student', session_id: sessionIdRef.current, student_name: studentNameRef.current } })
     socketRef.current = socket
-    function join() {
-      socket.emit('student_join', { session_id: sessionIdRef.current, student_name: studentNameRef.current })
-    }
     function onPauseState({ student_name, paused: p }) {
       if (student_name !== studentNameRef.current) return
       pausedRef.current = p
@@ -122,11 +112,9 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
         requestFullscreen()
       }
     }
-    socket.on('connect', join)
     socket.on('pause_state', onPauseState)
     return () => {
       flushKeystrokes()
-      socket.off('connect', join)
       socket.off('pause_state', onPauseState)
       socket.disconnect()
     }

@@ -25,7 +25,9 @@ function freePort() {
 
 // Starts server/index.js on a free port with a fresh DB and uploads folder.
 // Resolves once the API answers. `stop()` kills it and removes the scratch dir.
-export async function startServer() {
+export const ADMIN = { email: 'admin@test.local', password: 'admin-pw' }
+
+export async function startServer({ admin = false } = {}) {
   const port = await freePort()
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'examlock-test-'))
   const child = spawn(process.execPath, ['server/index.js'], {
@@ -36,8 +38,8 @@ export async function startServer() {
       DB_PATH: path.join(dir, 'test.db'),
       UPLOADS_PATH: path.join(dir, 'uploads'),
       JWT_SECRET: 'examlock-test-secret',
-      ADMIN_EMAIL: '',
-      ADMIN_PASSWORD: '',
+      ADMIN_EMAIL: admin ? ADMIN.email : '',
+      ADMIN_PASSWORD: admin ? ADMIN.password : '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -116,6 +118,16 @@ export async function registerTeacher(a, email, name = email.split('@')[0]) {
   const { body } = await a.post('/api/auth/register', { email, name, password: 'pw' })
   if (!body?.token) throw new Error(`register failed: ${JSON.stringify(body)}`)
   return body.token
+}
+
+// The superadmin is seeded asynchronously at startup, so retry briefly.
+export async function loginAdmin(a) {
+  for (let i = 0; i < 50; i++) {
+    const { body } = await a.post('/api/auth/login', ADMIN)
+    if (body?.token) return body.token
+    await sleep(100)
+  }
+  throw new Error('admin login never succeeded')
 }
 
 // Creates an exam, opens it, and returns ids plus the teacher's view of it.

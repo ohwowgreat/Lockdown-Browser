@@ -114,6 +114,7 @@ function SubmissionCard({ sub, exam, events }) {
                       {e.type === 'joined'       && '→ '}
                       {e.type === 'disconnected' && '← '}
                       {e.type === 'keystrokes'   && '⌨️ '}
+                      {e.type === 'duplicate_submission' && '⚠️ '}
                       {e.detail || e.type}
                     </span>
                   </div>
@@ -250,6 +251,11 @@ export default function TeacherMonitor() {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, notes: (x.notes || 0) + 1 } : x))
       addLog(`${student_name} ${action}`, 'note')
       appendEvent(student_name, 'note', action, at)
+    })
+
+    socket.on('student_flag', ({ student_name, type, detail, at }) => {
+      addLog(`${student_name}: ${detail}`, 'warn')
+      appendEvent(student_name, type, detail, at)
     })
 
     socket.on('student_keystrokes', ({ student_name, keys, at }) => {

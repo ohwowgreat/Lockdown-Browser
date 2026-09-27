@@ -1,11 +1,11 @@
 // Socket.IO access checks: who may join the live monitor feed, what students
 // can and cannot receive, and who may pause a student.
 import { io } from 'socket.io-client'
-import { startServer, checker, api, registerTeacher, createOpenExam, sleep } from './lib.mjs'
+import { startServer, checker, api, registerTeacher, createOpenExam, loginAdmin, sleep } from './lib.mjs'
 
 const MONITOR_EVENTS = ['student_joined', 'student_violation', 'student_note', 'student_keystrokes', 'submission', 'student_left']
 
-const srv = await startServer()
+const srv = await startServer({ admin: true })
 const a = api(srv.base)
 const t = checker()
 const sockets = []
@@ -31,8 +31,6 @@ try {
   const noTok = sock('no token')
   const other = sock('other teacher')
   const badTok = sock('garbage token')
-  const ada = sock('student Ada')
-  const bob = sock('student Bob')
   await Promise.all(sockets.map(connected))
 
   owner.emit('join_session', { session_id: SID, token: T1 })
@@ -40,13 +38,26 @@ try {
   other.emit('join_session', { session_id: SID, token: T2 })
   badTok.emit('join_session', { session_id: SID, token: 'not.a.jwt' })
   await sleep(300)
-  ada.emit('student_join', { session_id: SID, student_name: 'Ada' })
-  bob.emit('student_join', { session_id: SID, student_name: 'Bob' })
+
+  // Students identify themselves in the handshake, not in events. They connect
+  // after the owner is in the teacher room so the owner sees the joins.
+  const asStudent = (session_id, student_name) => ({ auth: { role: 'student', session_id, student_name } })
+  const ada = sock('student Ada', asStudent(SID, 'Ada'))
+  const bob = sock('student Bob', asStudent(SID, 'Bob'))
+  const ghost = sock('student in unknown session', asStudent('no-such-session', 'Ghost'))
+  const legacy = sock('legacy student_join emitter')
+  await Promise.all([ada, bob, ghost, legacy].map(connected))
+  legacy.emit('student_join', { session_id: SID, student_name: 'Legacy' })
   await sleep(300)
 
-  bob.emit('violation', { session_id: SID, student_name: 'Bob', count: 1 })
-  bob.emit('note', { session_id: SID, student_name: 'Bob', action: 'copied text' })
-  bob.emit('keystrokes', { session_id: SID, student_name: 'Bob', keys: [{ key: 'h' }, { key: 'i' }] })
+  // Bob's events. The payload names Ada on purpose: the server must ignore it.
+  bob.emit('violation', { session_id: SID, student_name: 'Ada', count: 1 })
+  bob.emit('note', { action: 'copied text' })
+  bob.emit('keystrokes', { keys: [{ key: 'h' }, { key: 'i' }] })
+  // Sockets with no student identity: nothing should come of these.
+  ghost.emit('violation', { count: 9 })
+  noTok.emit('violation', { session_id: SID, student_name: 'Ada', count: 9 })
+  legacy.emit('violation', { session_id: SID, student_name: 'Legacy', count: 9 })
   await a.post('/api/submissions', { session_id: SID, student_name: 'Bob', answers: { q1: 1 }, violations: 1 })
   await sleep(300)
 
@@ -63,8 +74,9 @@ try {
 
   t.section('Owner monitor socket')
   t.check('owner is not denied', owner.got('join_denied').length === 0)
-  t.check('owner sees both joins', owner.got('student_joined').map(r => r.payload.student_name).sort().join() === 'Ada,Bob')
-  t.check('owner sees the violation', owner.got('student_violation').length === 1)
+  t.check('owner sees exactly the two real joins', owner.got('student_joined').map(r => r.payload.student_name).sort().join() === 'Ada,Bob', owner.got('student_joined').map(r => r.payload.student_name).join())
+  t.check('owner sees one violation', owner.got('student_violation').length === 1, String(owner.got('student_violation').length))
+  t.check('violation is attributed to Bob, not the spoofed name', owner.got('student_violation')[0]?.payload?.student_name === 'Bob')
   t.check('owner sees the note', owner.got('student_note').length === 1)
   t.check('owner sees keystrokes', owner.got('student_keystrokes').length === 1)
   t.check('owner sees the submission with answers', owner.got('submission')[0]?.payload?.answers?.q1 === 1)
@@ -86,6 +98,22 @@ try {
 
   const { body: events } = await a.get(`/api/sessions/${SID}/events`, T1)
   t.check('exactly one paused event was logged', events.filter(e => e.type === 'paused').length === 1)
+
+  t.section('Unidentified sockets')
+  t.check('unknown-session student was never logged as joined', !events.some(e => e.student_name === 'Ghost'))
+  t.check('legacy student_join emitter was ignored', !events.some(e => e.student_name === 'Legacy'))
+  t.check('no violation logged under a spoofed or foreign name', events.filter(e => e.type === 'violation').length === 1 && events.find(e => e.type === 'violation').student_name === 'Bob')
+
+  t.section('Suspended teacher cannot join the live feed')
+  const ADMIN_TOKEN = await loginAdmin(a)
+  const { body: teachers } = await a.get('/api/admin/teachers', ADMIN_TOKEN)
+  const t1 = teachers.find(x => x.email === 's1@x.com')
+  await a.patch(`/api/admin/teachers/${t1.id}/suspend`, { is_suspended: true }, ADMIN_TOKEN)
+  const late = sock('owner after suspension')
+  await connected(late)
+  late.emit('join_session', { session_id: SID, token: T1 })
+  await sleep(300)
+  t.check('suspended owner is denied', late.got('join_denied').length === 1)
 } finally {
   sockets.forEach(s => s.disconnect())
   await srv.stop()
