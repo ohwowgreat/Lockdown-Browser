@@ -78,6 +78,24 @@ try {
   await monitor.getByRole('button', { name: 'Resume' }).click()
   t.check('student overlay clears on resume', await hidden(student.getByText(/paused by your teacher/)))
 
+  t.section('Brief exits: logged, and a burst becomes one violation')
+  // Leave and return inside the grace window, three times. Synthetic blur and
+  // focus go through the same handlers as a real window switch.
+  const flicker = () => student.evaluate(async () => {
+    window.dispatchEvent(new Event('blur'))
+    await new Promise(r => setTimeout(r, 150))
+    window.dispatchEvent(new Event('focus'))
+  })
+  const linusRow = monitor.locator('[class*="studentRow"]', { hasText: 'Linus' })
+  await flicker()
+  t.check('first brief exit reaches the monitor log', await visible(monitor.getByText(/Linus briefly left the exam/).first()))
+  t.check('one brief exit, no violation yet', await visible(linusRow.getByText(/1 brief exit/)) && (await linusRow.getByText(/violation/).count()) === 0)
+  await flicker()
+  await flicker()
+  t.check('three brief exits shown', await visible(linusRow.getByText(/3 brief exits/)))
+  t.check('burst counted as one violation', await visible(linusRow.getByText(/1 violation/)))
+  t.check('student saw the violation warning', await visible(student.getByText(/Violation #1/)))
+
   t.section('Countdown survives a reload')
   const timed = await createOpenExam(a, token, { title: 'Timed Exam', time_limit: 10 })
   const timedCtx = await browser.newContext()

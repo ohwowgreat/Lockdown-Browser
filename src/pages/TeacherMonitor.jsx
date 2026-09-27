@@ -18,6 +18,7 @@ function SubmissionCard({ sub, exam, events }) {
   const score = calcScore(exam.questions, sub.answers || {})
   const studentEvents = (events || []).filter(e => e.student_name === sub.student_name)
   const copyPasteCount = studentEvents.filter(e => e.type === 'note').length
+  const briefExitCount = studentEvents.filter(e => e.type === 'brief_exit').length
 
   return (
     <div className={`card ${styles.submissionCard}`}>
@@ -36,6 +37,9 @@ function SubmissionCard({ sub, exam, events }) {
             )}
             {copyPasteCount > 0 && (
               <span className="badge badge-blue">📋 {copyPasteCount} copy/paste</span>
+            )}
+            {briefExitCount > 0 && (
+              <span className="badge badge-blue">↩ {briefExitCount} brief exit{briefExitCount !== 1 ? 's' : ''}</span>
             )}
             <span className="badge badge-green">Submitted</span>
           </div>
@@ -114,6 +118,7 @@ function SubmissionCard({ sub, exam, events }) {
                       {e.type === 'joined'       && '→ '}
                       {e.type === 'disconnected' && '← '}
                       {e.type === 'keystrokes'   && '⌨️ '}
+                      {e.type === 'brief_exit'   && '↩ '}
                       {e.type === 'duplicate_submission' && '⚠️ '}
                       {e.detail || e.type}
                     </span>
@@ -175,13 +180,14 @@ export default function TeacherMonitor() {
         const studentMap = {}
         for (const e of evts) {
           if (!studentMap[e.student_name]) {
-            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, submitted: false, ip: null, paused: false }
+            studentMap[e.student_name] = { name: e.student_name, violations: 0, notes: 0, briefExits: 0, submitted: false, ip: null, paused: false }
           }
           if (e.type === 'violation') {
             const num = parseInt(e.detail?.match(/#(\d+)/)?.[1] || 0)
             studentMap[e.student_name].violations = Math.max(studentMap[e.student_name].violations, num)
           }
           if (e.type === 'note')      studentMap[e.student_name].notes += 1
+          if (e.type === 'brief_exit') studentMap[e.student_name].briefExits += 1
           if (e.type === 'submitted') studentMap[e.student_name].submitted = true
           if (e.type === 'paused')    studentMap[e.student_name].paused = true
           if (e.type === 'resumed')   studentMap[e.student_name].paused = false
@@ -190,7 +196,7 @@ export default function TeacherMonitor() {
         // Also mark submitted from submissions table
         for (const s of subs) {
           if (!studentMap[s.student_name]) {
-            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, submitted: true, ip: s.ip || null, paused: false }
+            studentMap[s.student_name] = { name: s.student_name, violations: s.violations, notes: 0, briefExits: 0, submitted: true, ip: s.ip || null, paused: false }
           } else {
             studentMap[s.student_name].submitted = true
             studentMap[s.student_name].violations = Math.max(studentMap[s.student_name].violations, s.violations)
@@ -225,7 +231,7 @@ export default function TeacherMonitor() {
     socket.on('student_joined', ({ student_name, ip }) => {
       setStudents(s => s.find(x => x.name === student_name)
         ? s.map(x => x.name === student_name ? { ...x, ip: x.ip || ip || null } : x)
-        : [...s, { name: student_name, violations: 0, notes: 0, submitted: false, ip: ip || null, paused: false }])
+        : [...s, { name: student_name, violations: 0, notes: 0, briefExits: 0, submitted: false, ip: ip || null, paused: false }])
       addLog(`${student_name} joined${ip ? ` (${ip})` : ''}`, 'info')
       appendEvent(student_name, 'joined', ip ? `IP ${ip}` : null)
     })
@@ -251,6 +257,12 @@ export default function TeacherMonitor() {
       setStudents(s => s.map(x => x.name === student_name ? { ...x, notes: (x.notes || 0) + 1 } : x))
       addLog(`${student_name} ${action}`, 'note')
       appendEvent(student_name, 'note', action, at)
+    })
+
+    socket.on('student_brief_exit', ({ student_name, reason, at }) => {
+      setStudents(s => s.map(x => x.name === student_name ? { ...x, briefExits: (x.briefExits || 0) + 1 } : x))
+      addLog(`${student_name} briefly left the exam (${reason})`, 'note')
+      appendEvent(student_name, 'brief_exit', reason, at)
     })
 
     socket.on('student_flag', ({ student_name, type, detail, at }) => {
@@ -352,6 +364,9 @@ export default function TeacherMonitor() {
                     )}
                     {s.notes > 0 && (
                       <span className="badge badge-blue">📋 {s.notes} copy/paste</span>
+                    )}
+                    {s.briefExits > 0 && (
+                      <span className="badge badge-blue">↩ {s.briefExits} brief exit{s.briefExits !== 1 ? 's' : ''}</span>
                     )}
                     {s.paused && !s.submitted && (
                       <span className="badge badge-yellow">⏸️ On break</span>

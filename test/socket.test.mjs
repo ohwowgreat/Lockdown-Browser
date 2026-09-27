@@ -3,7 +3,7 @@
 import { io } from 'socket.io-client'
 import { startServer, checker, api, registerTeacher, createOpenExam, loginAdmin, sleep } from './lib.mjs'
 
-const MONITOR_EVENTS = ['student_joined', 'student_violation', 'student_note', 'student_keystrokes', 'submission', 'student_left']
+const MONITOR_EVENTS = ['student_joined', 'student_violation', 'student_note', 'student_brief_exit', 'student_keystrokes', 'submission', 'student_left']
 
 const srv = await startServer({ admin: true })
 const a = api(srv.base)
@@ -53,6 +53,7 @@ try {
   // Bob's events. The payload names Ada on purpose: the server must ignore it.
   bob.emit('violation', { session_id: SID, student_name: 'Ada', count: 1 })
   bob.emit('note', { action: 'copied text' })
+  bob.emit('brief_exit', { reason: 'Exited fullscreen' })
   bob.emit('keystrokes', { keys: [{ key: 'h' }, { key: 'i' }] })
   // Sockets with no student identity: nothing should come of these.
   ghost.emit('violation', { count: 9 })
@@ -78,6 +79,7 @@ try {
   t.check('owner sees one violation', owner.got('student_violation').length === 1, String(owner.got('student_violation').length))
   t.check('violation is attributed to Bob, not the spoofed name', owner.got('student_violation')[0]?.payload?.student_name === 'Bob')
   t.check('owner sees the note', owner.got('student_note').length === 1)
+  t.check('owner sees the brief exit', owner.got('student_brief_exit')[0]?.payload?.reason === 'Exited fullscreen')
   t.check('owner sees keystrokes', owner.got('student_keystrokes').length === 1)
   t.check('owner sees the submission with answers', owner.got('submission')[0]?.payload?.answers?.q1 === 1)
   t.check('owner sees pause_state', owner.got('pause_state').length === 1)
@@ -98,6 +100,14 @@ try {
 
   const { body: events } = await a.get(`/api/sessions/${SID}/events`, T1)
   t.check('exactly one paused event was logged', events.filter(e => e.type === 'paused').length === 1)
+
+  t.section('Brief exits in the export')
+  t.check('brief exit logged under its own type', events.some(e => e.type === 'brief_exit' && e.student_name === 'Bob'))
+  const { text: csv } = await a.get(`/api/sessions/${SID}/export.csv`, T1)
+  const header = csv.split('\n')[0].split(',')
+  const bobRow = csv.split('\n').find(l => l.startsWith('"Bob"'))?.split(',') || []
+  t.check('CSV has a Brief Exits column', header.includes('"Brief Exits"'))
+  t.check('CSV counts Bob\'s brief exit', bobRow[header.indexOf('"Brief Exits"')] === '"1"', bobRow[header.indexOf('"Brief Exits"')])
 
   t.section('Unidentified sockets')
   t.check('unknown-session student was never logged as joined', !events.some(e => e.student_name === 'Ghost'))

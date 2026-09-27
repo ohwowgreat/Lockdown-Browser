@@ -269,3 +269,4 @@ h2 {
 .event_note        { background: var(--accent-light); }
 .event_submitted   { background: var(--success-light); }
 .event_keystrokes  { background: #f5f5f5; font-family: monospace; font-size: 0.75rem; color: var(--muted); }
+.event_brief_exit  { background: var(--bg); color: var(--muted); }

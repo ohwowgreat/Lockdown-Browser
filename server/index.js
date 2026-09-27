@@ -335,7 +335,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
   const headers = [
     'Student Name', 'IP Address', 'Submitted At',
     `Score (MC ${mcQuestions.length} questions)`,
-    'Violations', 'Copy/Paste Events',
+    'Violations', 'Copy/Paste Events', 'Brief Exits',
     ...questions.map((q, i) => `Q${i + 1}: ${q.text.replace(/"/g, '""')}`),
     'Action Log'
   ]
@@ -345,6 +345,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
     const mcCorrect = mcQuestions.filter(q => answers[q.id] === q.correct).length
     const studentEvents = eventsByStudent[s.student_name] || []
     const copyPasteCount = studentEvents.filter(e => e.type === 'note').length
+    const briefExitCount = studentEvents.filter(e => e.type === 'brief_exit').length
     // Prefer the IP saved with the submission; fall back to the join event.
     const joinIp = studentEvents.find(e => e.type === 'joined' && e.detail?.startsWith('IP '))?.detail?.slice(3)
     const actionLog = studentEvents
@@ -355,7 +356,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
       s.ip || joinIp || '',
       new Date(s.submitted_at * 1000).toLocaleString(),
       mcQuestions.length > 0 ? `${mcCorrect}/${mcQuestions.length}` : 'N/A',
-      s.violations, copyPasteCount,
+      s.violations, copyPasteCount, briefExitCount,
       ...questions.map(q => {
         const ans = answers[q.id]
         if (q.type === 'multiple_choice') {
@@ -482,6 +483,14 @@ io.on('connection', (socket) => {
     const s = student(); if (!s) return
     logEvent(s.session_id, s.student_name, 'note', String(action || ''))
     io.to(teacherRoom(s.session_id)).emit('student_note', { student_name: s.student_name, action, at: Date.now() })
+  })
+
+  // Left and came back inside the grace window. Not a violation by itself;
+  // the client escalates a burst of these into one.
+  socket.on('brief_exit', ({ reason } = {}) => {
+    const s = student(); if (!s) return
+    logEvent(s.session_id, s.student_name, 'brief_exit', String(reason || ''))
+    io.to(teacherRoom(s.session_id)).emit('student_brief_exit', { student_name: s.student_name, reason, at: Date.now() })
   })
 
   // Teacher pauses/resumes a specific student (e.g. bathroom break). Honoured

@@ -12,6 +12,13 @@ const DEFAULT_SETTINGS = { navigation: 'track', copy_paste: 'track', log_keystro
 // within this window is forgiven; a deliberate exit that persists is recorded.
 const GRACE_MS = 2500
 
+// An exit that comes back inside the grace window is not a violation, but it
+// is recorded as a brief exit so the teacher can see the pattern. Enough brief
+// exits in a short span count as one violation, so tapping Esc or F11 over and
+// over is not free.
+const BRIEF_EXIT_WINDOW_MS = 60_000
+const BRIEF_EXITS_PER_VIOLATION = 3
+
 export function useLockdown({ sessionId, studentName, enabled = true, settings = DEFAULT_SETTINGS }) {
   const s = { ...DEFAULT_SETTINGS, ...settings }
 
@@ -29,6 +36,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   const flushTimerRef    = useRef(null)
   const awayTimerRef     = useRef(null)   // pending grace timer for the current away-episode
   const awayReasonRef    = useRef('')
+  const briefExitsRef    = useRef([])     // timestamps of recent brief exits
   const blockNavRef      = useRef(s.navigation === 'block')
   const pausedRef        = useRef(false)  // synchronous gate for event handlers
 
@@ -49,17 +57,40 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     if (socketRef.current) socketRef.current.emit('violation', { count })
   }, [warn])
 
+  const recordBriefExit = useCallback((reason) => {
+    if (socketRef.current) socketRef.current.emit('brief_exit', { reason })
+    const now = Date.now()
+    const recent = briefExitsRef.current.filter(t => now - t < BRIEF_EXIT_WINDOW_MS)
+    recent.push(now)
+    if (recent.length >= BRIEF_EXITS_PER_VIOLATION) {
+      briefExitsRef.current = []
+      recordViolation(`Left the exam ${recent.length} times in quick succession`)
+      if (blockNavRef.current) setAwayBlocked(true)
+    } else {
+      briefExitsRef.current = recent
+    }
+  }, [recordViolation])
+
   // ── Away-episode tracking ──────────────────────────────────────────────────
-  // goneAway starts a grace timer; if the student returns (cameBack) before it
-  // fires, nothing is recorded. Multiple events for one action (blur +
-  // visibilitychange + fullscreenchange) collapse into a single episode. Each
+  // goneAway starts a grace timer. If the student returns (cameBack) before it
+  // fires, the episode is a brief exit: logged, and counted towards the burst
+  // rule, but not a violation on its own. Multiple events for one action (blur
+  // + visibilitychange + fullscreenchange) collapse into a single episode. Each
   // *completed* away-episode that outlasts the grace window counts once, so
   // deliberate repeat exits each add a violation while accidental flickers don't.
   const cameBack = useCallback(() => {
-    if (awayTimerRef.current) {
-      clearTimeout(awayTimerRef.current)
-      awayTimerRef.current = null
-    }
+    if (!awayTimerRef.current) return
+    clearTimeout(awayTimerRef.current)
+    awayTimerRef.current = null
+    recordBriefExit(awayReasonRef.current)
+  }, [recordBriefExit])
+
+  // Drops a pending episode without recording anything (a teacher-granted
+  // break starting mid-episode should not count against the student).
+  const cancelAway = useCallback(() => {
+    if (!awayTimerRef.current) return
+    clearTimeout(awayTimerRef.current)
+    awayTimerRef.current = null
   }, [])
 
   const goneAway = useCallback((reason) => {
@@ -105,7 +136,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
       if (p) {
         // Starting a break: cancel any pending away-episode so the break
         // itself never counts, and let the student leave the page freely.
-        cameBack()
+        cancelAway()
         setAwayBlocked(false)
       } else {
         // Break over: pull the student back into the exam.
@@ -118,7 +149,7 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
       socket.off('pause_state', onPauseState)
       socket.disconnect()
     }
-  }, [enabled, sessionId, flushKeystrokes, cameBack, requestFullscreen])
+  }, [enabled, sessionId, flushKeystrokes, cancelAway, requestFullscreen])
 
   useEffect(() => {
     if (!enabled || !s.log_keystrokes) return
