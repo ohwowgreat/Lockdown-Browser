@@ -171,6 +171,13 @@ function parseExam(e) {
   return { ...e, questions: JSON.parse(e.questions), settings: JSON.parse(e.settings || DEFAULT_SETTINGS) }
 }
 
+// Student-facing view of an exam: same shape as parseExam, minus everything a
+// student must never receive (the answer key and the owning teacher's id).
+function studentExam(e) {
+  const { teacher_id, ...exam } = parseExam(e)
+  return { ...exam, questions: exam.questions.map(({ correct, ...q }) => q) }
+}
+
 app.get('/api/exams', requireAuth, (req, res) => {
   const exams = db.prepare('SELECT * FROM exams WHERE teacher_id = ? ORDER BY created_at DESC').all(req.teacher.id)
   res.json(exams.map(parseExam))
@@ -226,7 +233,7 @@ app.get('/api/exams/code/:code', (req, res) => {
   const exam = db.prepare('SELECT * FROM exams WHERE code = ?').get(req.params.code.toUpperCase())
   if (!exam) return res.status(404).json({ error: 'Invalid code' })
   if (!exam.is_active) return res.status(400).json({ error: 'This exam is not open yet. Wait for your teacher to open it.' })
-  res.json(parseExam(exam))
+  res.json(studentExam(exam))
 })
 
 app.post('/api/submissions', (req, res) => {
@@ -242,25 +249,36 @@ app.post('/api/submissions', (req, res) => {
 
 // ── Session / results routes (teacher-scoped via session→exam→teacher) ────────
 
-app.get('/api/sessions/:id', requireAuth, (req, res) => {
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id)
+// Resolves :id to a session and checks it belongs to an exam owned by the
+// requesting teacher. A missing session, another teacher's exam, or an exam
+// with no owner all answer 404, so the id's existence is never confirmed.
+function requireSessionOwner(req, res, next) {
+  const session = db.prepare(`
+    SELECT s.* FROM sessions s
+    JOIN exams e ON e.id = s.exam_id
+    WHERE s.id = ? AND e.teacher_id = ?
+  `).get(req.params.id, req.teacher.id)
   if (!session) return res.status(404).json({ error: 'Not found' })
-  res.json(session)
+  req.examSession = session
+  next()
+}
+
+app.get('/api/sessions/:id', requireAuth, requireSessionOwner, (req, res) => {
+  res.json(req.examSession)
 })
 
-app.get('/api/sessions/:id/submissions', requireAuth, (req, res) => {
+app.get('/api/sessions/:id/submissions', requireAuth, requireSessionOwner, (req, res) => {
   const subs = db.prepare('SELECT * FROM submissions WHERE session_id = ? ORDER BY submitted_at DESC').all(req.params.id)
   res.json(subs.map(s => ({ ...s, answers: JSON.parse(s.answers) })))
 })
 
-app.get('/api/sessions/:id/events', requireAuth, (req, res) => {
+app.get('/api/sessions/:id/events', requireAuth, requireSessionOwner, (req, res) => {
   const events = db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY at ASC').all(req.params.id)
   res.json(events)
 })
 
-app.get('/api/sessions/:id/export.csv', requireAuth, (req, res) => {
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id)
-  if (!session) return res.status(404).send('Not found')
+app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, res) => {
+  const session = req.examSession
   const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(session.exam_id)
   const questions = JSON.parse(exam.questions)
   const subs = db.prepare('SELECT * FROM submissions WHERE session_id = ? ORDER BY submitted_at ASC').all(req.params.id)

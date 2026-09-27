@@ -139,6 +139,7 @@ export default function TeacherMonitor() {
   const [submissions, setSubmissions] = useState([])
   const [events, setEvents] = useState([])
   const [log, setLog] = useState([])
+  const [exporting, setExporting] = useState(false)
   const socketRef = useRef(null)
   const sidRef = useRef(null)                   // always-current sid for socket callbacks
 
@@ -276,6 +277,32 @@ export default function TeacherMonitor() {
     socketRef.current?.emit('set_pause', { session_id: sidRef.current, student_name, paused })
   }
 
+  // The export route needs the teacher's bearer token, which a plain
+  // <a download> link cannot send. Fetch with auth, then hand the browser the
+  // response as a file download.
+  async function exportCsv() {
+    setExporting(true)
+    try {
+      const res = await fetch(`/api/sessions/${sid}/export.csv`, { headers: authHeaders() })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'results.csv'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Could not export results. Please try again.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const examUrl = `${window.location.origin}/student`
 
   return (
@@ -361,13 +388,13 @@ export default function TeacherMonitor() {
           <div className={styles.subHeader2}>
             <h2>Submissions ({submissions.length})</h2>
             {submissions.length > 0 && (
-              <a
-                href={`/api/sessions/${sid}/export.csv`}
-                download
+              <button
                 className={`btn-primary ${styles.exportBtn}`}
+                onClick={exportCsv}
+                disabled={exporting}
               >
-                ↓ Export All as CSV
-              </a>
+                {exporting ? 'Exporting…' : '↓ Export All as CSV'}
+              </button>
             )}
           </div>
 
