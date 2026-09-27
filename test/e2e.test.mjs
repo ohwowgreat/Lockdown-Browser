@@ -37,7 +37,17 @@ try {
 
   // Teacher and student get separate browser contexts, like two machines.
   const teacherCtx = await browser.newContext({ acceptDownloads: true })
-  const studentCtx = await browser.newContext()
+  // The student context pretends to have a second display, and lets the test
+  // fake a wider screen (Playwright resizes the emulated screen along with the
+  // viewport, so a real viewport change never reads as a smaller window).
+  const studentCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+  await studentCtx.addInitScript(() => {
+    try {
+      const realWidth = window.screen.width
+      Object.defineProperty(window.screen, 'isExtended', { get: () => true, configurable: true })
+      Object.defineProperty(window.screen, 'width', { get: () => window.__fakeScreenWidth || realWidth, configurable: true })
+    } catch {}
+  })
   const monitor = await teacherCtx.newPage()
   const apiFailures = []
   monitor.on('response', r => { if (r.url().includes('/api/') && r.status() >= 400) apiFailures.push(`${r.status()} ${r.url()}`) })
@@ -114,6 +124,27 @@ try {
   t.check('three brief exits shown', await visible(linusRow.getByText(/3 brief exits/)))
   t.check('burst counted as one violation', await visible(linusRow.getByText(/1 violation/)))
   t.check('student saw the violation warning', await visible(student.getByText(/Violation #1/)))
+
+  t.section('Environment flags')
+  t.check('second display flagged at start', await visible(monitor.getByText(/Linus: More than one display connected/)))
+  await student.evaluate(() => { window.__fakeScreenWidth = 2560; window.dispatchEvent(new Event('resize')) })
+  t.check('small window flagged with its size', await visible(monitor.getByText(/Linus: Exam window is 1280×720 on a 2560×720 screen/)))
+  t.check('badge counts both flags', await visible(linusRow.getByText(/2 environment flags/)))
+  await student.evaluate(() => { window.__fakeScreenWidth = 0; window.dispatchEvent(new Event('resize')) })
+  await student.waitForTimeout(800)
+  t.check('flags are not violations', (await linusRow.getByText(/2 violations/).count()) === 0)
+  t.check('returning to normal size adds no flag', (await linusRow.getByText(/3 environment flags/).count()) === 0)
+
+  t.section('Focus heartbeat')
+  // Pretend focus was lost without any blur event. The heartbeat should open
+  // one episode, which becomes one violation, and never repeat while unfocused.
+  await student.evaluate(() => { document.hasFocus = () => false })
+  t.check('heartbeat records a single violation with its reason', await visible(monitor.getByText(/Linus: violation #2 \(Exam window lost focus\)/), 15000))
+  await student.waitForTimeout(8000)
+  t.check('no repeat violation while still unfocused', (await monitor.getByText(/violation #3/).count()) === 0)
+  await student.evaluate(() => { delete document.hasFocus })
+  await student.waitForTimeout(6000)
+  t.check('violations stayed at 2 after focus returned', await visible(linusRow.getByText(/2 violations/)) && (await monitor.getByText(/violation #3/).count()) === 0)
 
   t.section('Countdown survives a reload')
   const timed = await createOpenExam(a, token, { title: 'Timed Exam', time_limit: 10 })

@@ -111,6 +111,7 @@ h2 {
 .log_note      { background: var(--accent-light); }
 .log_ok        { background: var(--success-light); }
 .log_keystroke { background: #f5f5f5; color: var(--muted); font-family: monospace; font-size: 0.75rem; }
+.log_env       { background: var(--warning-light); }
 
 /* ---- Submissions ---- */
 
@@ -270,3 +271,4 @@ h2 {
 .event_submitted   { background: var(--success-light); }
 .event_keystrokes  { background: #f5f5f5; font-family: monospace; font-size: 0.75rem; color: var(--muted); }
 .event_brief_exit  { background: var(--bg); color: var(--muted); }
+.event_env         { background: var(--warning-light); }

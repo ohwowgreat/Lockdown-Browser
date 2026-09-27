@@ -148,6 +148,35 @@
 }
 .toggleOn .toggleThumb { transform: translateX(20px); }
 
+.disclosureCols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+@media (max-width: 640px) { .disclosureCols { grid-template-columns: 1fr; } }
+
+.disclosureHead {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin-bottom: 0.375rem;
+}
+
+.disclosureList {
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.disclosureNote {
+  margin-top: 0.625rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .imageUpload { margin-top: 0.75rem; }
 
 .imagePreview {

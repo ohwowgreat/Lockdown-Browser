@@ -359,7 +359,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
   const headers = [
     'Student Name', 'IP Address', 'Submitted At',
     `Score (MC ${mcQuestions.length} questions)`,
-    'Violations', 'Copy/Paste Events', 'Brief Exits',
+    'Violations', 'Copy/Paste Events', 'Brief Exits', 'Environment Flags',
     ...questions.map((q, i) => `Q${i + 1}: ${q.text.replace(/"/g, '""')}`),
     'Action Log'
   ]
@@ -370,6 +370,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
     const studentEvents = eventsByStudent[s.student_name] || []
     const copyPasteCount = studentEvents.filter(e => e.type === 'note').length
     const briefExitCount = studentEvents.filter(e => e.type === 'brief_exit').length
+    const envCount = studentEvents.filter(e => e.type === 'env').length
     // Prefer the IP saved with the submission; fall back to the join event.
     const joinIp = studentEvents.find(e => e.type === 'joined' && e.detail?.startsWith('IP '))?.detail?.slice(3)
     const actionLog = studentEvents
@@ -380,7 +381,7 @@ app.get('/api/sessions/:id/export.csv', requireAuth, requireSessionOwner, (req, 
       s.ip || joinIp || '',
       new Date(s.submitted_at * 1000).toLocaleString(),
       mcQuestions.length > 0 ? `${mcCorrect}/${mcQuestions.length}` : 'N/A',
-      s.violations, copyPasteCount, briefExitCount,
+      s.violations, copyPasteCount, briefExitCount, envCount,
       ...questions.map(q => {
         const ans = answers[q.id]
         if (q.type === 'multiple_choice') {
@@ -497,10 +498,19 @@ io.on('connection', (socket) => {
   // a joined student. Student events are dropped without it.
   const student = () => (socket.data.session_id && socket.data.student_name ? socket.data : null)
 
-  socket.on('violation', ({ count } = {}) => {
+  socket.on('violation', ({ count, reason } = {}) => {
     const s = student(); if (!s) return
-    logEvent(s.session_id, s.student_name, 'violation', `#${count} – switched away from exam`)
-    io.to(teacherRoom(s.session_id)).emit('student_violation', { student_name: s.student_name, count, at: Date.now() })
+    const why = String(reason || 'switched away from exam')
+    logEvent(s.session_id, s.student_name, 'violation', `#${count} – ${why}`)
+    io.to(teacherRoom(s.session_id)).emit('student_violation', { student_name: s.student_name, count, reason: why, at: Date.now() })
+  })
+
+  // Something about the student's setup worth a look: a small window beside
+  // something else, a second display. Informational, never a violation.
+  socket.on('env', ({ detail } = {}) => {
+    const s = student(); if (!s) return
+    logEvent(s.session_id, s.student_name, 'env', String(detail || ''))
+    io.to(teacherRoom(s.session_id)).emit('student_env', { student_name: s.student_name, detail, at: Date.now() })
   })
 
   socket.on('note', ({ action } = {}) => {

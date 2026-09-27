@@ -260,6 +260,32 @@ export default function TeacherExamBuilder() {
           </div>
         </div>
 
+        <div className={`card ${styles.disclosure}`} style={{ marginTop: '1rem' }}>
+          <p className={styles.sectionLabel}>What ExamLock can and cannot detect</p>
+          <div className={styles.disclosureCols}>
+            <div>
+              <p className={styles.disclosureHead}>Detected and shown in the monitor</p>
+              <ul className={styles.disclosureList}>
+                <li>Switching to another tab, window or app, after a short grace period</li>
+                <li>Leaving fullscreen, and repeated brief exits</li>
+                <li>Copy and paste, and keystrokes if logging is on</li>
+                <li>A browser window much smaller than the screen, or a second display</li>
+                <li>Connection drops, reconnects, and duplicate submissions</li>
+              </ul>
+            </div>
+            <div>
+              <p className={styles.disclosureHead}>Not detectable from a web page</p>
+              <ul className={styles.disclosureList}>
+                <li>Apps or overlays that float over the browser without taking focus</li>
+                <li>A phone or any second device</li>
+                <li>What is shown on a second display</li>
+                <li>Browser extensions that stay away from the answer fields</li>
+              </ul>
+              <p className={styles.disclosureNote}>Use the environment flags as a prompt to look, and walk the room.</p>
+            </div>
+          </div>
+        </div>
+
         {questions.map((q, idx) => (
           <div key={q.id} className="card" style={{ marginTop: '1rem' }}>
             <div className={styles.qHeader}>

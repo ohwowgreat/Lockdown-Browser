@@ -19,6 +19,18 @@ const GRACE_MS = 2500
 const BRIEF_EXIT_WINDOW_MS = 60_000
 const BRIEF_EXITS_PER_VIOLATION = 3
 
+// Environment flags are observations, not violations: a browser window much
+// smaller than the screen (something is probably beside it), more than one
+// display, and so on. They go to the teacher as notes.
+const SMALL_WINDOW_WIDTH_RATIO = 0.85
+const SMALL_WINDOW_HEIGHT_RATIO = 0.6
+
+// The blur event can be missed (some overlays take focus without one), so a
+// slow heartbeat also checks document.hasFocus(). It only ever ends an
+// episode it started itself, so a fullscreen exit is never cut short by it.
+const FOCUS_HEARTBEAT_MS = 5000
+const FOCUS_LOST_REASON = 'Exam window lost focus'
+
 export function useLockdown({ sessionId, studentName, enabled = true, settings = DEFAULT_SETTINGS }) {
   const s = { ...DEFAULT_SETTINGS, ...settings }
 
@@ -37,6 +49,8 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   const awayTimerRef     = useRef(null)   // pending grace timer for the current away-episode
   const awayReasonRef    = useRef('')
   const briefExitsRef    = useRef([])     // timestamps of recent brief exits
+  const heartbeatAwayRef = useRef(false)  // heartbeat has an episode open
+  const smallWindowRef   = useRef(false)  // currently flagged as small
   const blockNavRef      = useRef(s.navigation === 'block')
   const pausedRef        = useRef(false)  // synchronous gate for event handlers
 
@@ -54,8 +68,12 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     const count = violationsRef.current
     setViolations(count)
     warn(`⚠️ Violation #${count}: ${reason}`)
-    if (socketRef.current) socketRef.current.emit('violation', { count })
+    if (socketRef.current) socketRef.current.emit('violation', { count, reason })
   }, [warn])
+
+  const recordEnv = useCallback((detail) => {
+    if (socketRef.current) socketRef.current.emit('env', { detail })
+  }, [])
 
   const recordBriefExit = useCallback((reason) => {
     if (socketRef.current) socketRef.current.emit('brief_exit', { reason })
@@ -217,6 +235,53 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [enabled, s.navigation])
+
+  // ── Focus heartbeat ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled || s.navigation === 'off') return
+    heartbeatAwayRef.current = false
+    const t = setInterval(() => {
+      if (pausedRef.current) return
+      const focused = document.hasFocus()
+      if (!focused && !heartbeatAwayRef.current) {
+        heartbeatAwayRef.current = true
+        goneAway(FOCUS_LOST_REASON)   // no-op if another episode is already open
+      } else if (focused && heartbeatAwayRef.current) {
+        heartbeatAwayRef.current = false
+        if (awayTimerRef.current && awayReasonRef.current === FOCUS_LOST_REASON) cameBack()
+      }
+    }, FOCUS_HEARTBEAT_MS)
+    return () => clearInterval(t)
+  }, [enabled, s.navigation, goneAway, cameBack])
+
+  // ── Environment flags ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled) return
+    function checkWindowSize() {
+      const sw = window.screen?.width || 0, sh = window.screen?.height || 0
+      if (!sw || !sh) return
+      const w = window.innerWidth, h = window.innerHeight
+      const small = w < sw * SMALL_WINDOW_WIDTH_RATIO || h < sh * SMALL_WINDOW_HEIGHT_RATIO
+      if (small && !smallWindowRef.current) recordEnv(`Exam window is ${w}×${h} on a ${sw}×${sh} screen`)
+      smallWindowRef.current = small
+    }
+    // Give the initial fullscreen request a moment before judging the size.
+    const initial = setTimeout(() => {
+      if (window.screen?.isExtended) recordEnv('More than one display connected')
+      checkWindowSize()
+    }, 1500)
+    let debounce = null
+    function onResize() {
+      clearTimeout(debounce)
+      debounce = setTimeout(checkWindowSize, 500)
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      clearTimeout(initial)
+      clearTimeout(debounce)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [enabled, recordEnv])
 
   // ── Copy / paste ──────────────────────────────────────────────────────────
   useEffect(() => {

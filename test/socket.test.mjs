@@ -3,7 +3,7 @@
 import { io } from 'socket.io-client'
 import { startServer, checker, api, registerTeacher, createOpenExam, loginAdmin, sleep } from './lib.mjs'
 
-const MONITOR_EVENTS = ['student_joined', 'student_violation', 'student_note', 'student_brief_exit', 'student_keystrokes', 'submission', 'student_left']
+const MONITOR_EVENTS = ['student_joined', 'student_violation', 'student_note', 'student_brief_exit', 'student_env', 'student_keystrokes', 'submission', 'student_left']
 
 const srv = await startServer({ admin: true })
 const a = api(srv.base)
@@ -51,7 +51,8 @@ try {
   await sleep(300)
 
   // Bob's events. The payload names Ada on purpose: the server must ignore it.
-  bob.emit('violation', { session_id: SID, student_name: 'Ada', count: 1 })
+  bob.emit('violation', { session_id: SID, student_name: 'Ada', count: 1, reason: 'Exited fullscreen' })
+  bob.emit('env', { detail: 'More than one display connected' })
   bob.emit('note', { action: 'copied text' })
   bob.emit('brief_exit', { reason: 'Exited fullscreen' })
   bob.emit('keystrokes', { keys: [{ key: 'h' }, { key: 'i' }] })
@@ -78,6 +79,8 @@ try {
   t.check('owner sees exactly the two real joins', owner.got('student_joined').map(r => r.payload.student_name).sort().join() === 'Ada,Bob', owner.got('student_joined').map(r => r.payload.student_name).join())
   t.check('owner sees one violation', owner.got('student_violation').length === 1, String(owner.got('student_violation').length))
   t.check('violation is attributed to Bob, not the spoofed name', owner.got('student_violation')[0]?.payload?.student_name === 'Bob')
+  t.check('violation carries its reason', owner.got('student_violation')[0]?.payload?.reason === 'Exited fullscreen')
+  t.check('owner sees the environment flag', owner.got('student_env')[0]?.payload?.detail === 'More than one display connected')
   t.check('owner sees the note', owner.got('student_note').length === 1)
   t.check('owner sees the brief exit', owner.got('student_brief_exit')[0]?.payload?.reason === 'Exited fullscreen')
   t.check('owner sees keystrokes', owner.got('student_keystrokes').length === 1)
@@ -108,6 +111,9 @@ try {
   const bobRow = csv.split('\n').find(l => l.startsWith('"Bob"'))?.split(',') || []
   t.check('CSV has a Brief Exits column', header.includes('"Brief Exits"'))
   t.check('CSV counts Bob\'s brief exit', bobRow[header.indexOf('"Brief Exits"')] === '"1"', bobRow[header.indexOf('"Brief Exits"')])
+  t.check('CSV counts Bob\'s environment flag', bobRow[header.indexOf('"Environment Flags"')] === '"1"', bobRow[header.indexOf('"Environment Flags"')])
+  t.check('violation detail includes the reason', events.some(e => e.type === 'violation' && e.detail.includes('Exited fullscreen')))
+  t.check('env event logged under its own type', events.some(e => e.type === 'env' && e.student_name === 'Bob'))
 
   t.section('Unidentified sockets')
   t.check('unknown-session student was never logged as joined', !events.some(e => e.student_name === 'Ghost'))
