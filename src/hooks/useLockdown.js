@@ -193,7 +193,14 @@ export function useLockdown({ sessionId, studentName, enabled = true, settings =
   //    forgiven, which absorbs accidental Tab-key focus jumps. ───────────────
   useEffect(() => {
     if (!enabled || s.navigation === 'off') return
-    function onBlur()  { goneAway('Switched to another window or app') }
+    function onBlur() {
+      // Focus moving into a frame inside the exam (an attached PDF) blurs the
+      // window, but the student has not left. Only count a blur that took
+      // focus out of the page entirely.
+      const el = document.activeElement
+      if (el && el.tagName === 'IFRAME' && document.contains(el)) return
+      goneAway('Switched to another window or app')
+    }
     function onFocus() { cameBack() }
     window.addEventListener('blur',  onBlur)
     window.addEventListener('focus', onFocus)

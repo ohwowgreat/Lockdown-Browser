@@ -55,6 +55,25 @@ try {
   t.check('duplicate attempt is logged for the teacher', events.some(e => e.type === 'duplicate_submission' && e.student_name === 'Ada'))
   t.check('missing fields rejected', (await a.post('/api/submissions', { answers: {} })).status === 400)
 
+  t.section('Question attachments')
+  const upload = async (bytes, type, name, tok = T1) => {
+    const fd = new FormData()
+    fd.append('file', new Blob([bytes], { type }), name)
+    const r = await a.raw('/api/upload', { method: 'POST', body: fd }, tok)
+    return { status: r.status, body: await r.json().catch(() => null) }
+  }
+  const img = await upload(Buffer.from('89504e470d0a1a0a', 'hex'), 'image/png', 'evil.html')
+  t.check('image upload accepted', img.status === 200 && img.body?.kind === 'image', JSON.stringify(img.body))
+  t.check('stored extension follows the type, not the filename', /\.png$/.test(img.body?.url || ''), img.body?.url)
+  const pdf = await upload(Buffer.from('%PDF-1.4\n%%EOF'), 'application/pdf', 'reading.pdf')
+  t.check('pdf upload accepted as kind pdf', pdf.status === 200 && pdf.body?.kind === 'pdf' && /\.pdf$/.test(pdf.body.url), JSON.stringify(pdf.body))
+  t.check('original name returned for display', pdf.body?.name === 'reading.pdf')
+  const served = await fetch(srv.base + pdf.body.url)
+  t.check('pdf served with a pdf content type', served.status === 200 && (served.headers.get('content-type') || '').includes('application/pdf'), served.headers.get('content-type'))
+  const txt = await upload(Buffer.from('hello'), 'text/plain', 'notes.txt')
+  t.check('other types rejected with a JSON 400', txt.status === 400 && /PDF/.test(txt.body?.error || ''), JSON.stringify(txt.body))
+  t.check('upload requires auth', (await a.raw('/api/upload', { method: 'POST', body: new FormData() })).status === 401)
+
   t.section('Suspension takes effect immediately')
   const ADMIN_TOKEN = await loginAdmin(a)
   const { body: teachers } = await a.get('/api/admin/teachers', ADMIN_TOKEN)

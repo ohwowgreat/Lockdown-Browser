@@ -34,11 +34,29 @@ function socketIp(socket) {
 // --- Uploads ---
 const uploadsDir = process.env.UPLOADS_PATH || path.join(__dirname, '../uploads')
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
+// Files a teacher may attach to a question. The stored extension comes from
+// the declared type, never from the uploaded filename, so nothing uploaded can
+// be served back from this origin as HTML or script.
+const ALLOWED_UPLOADS = {
+  'image/jpeg':      { kind: 'image', ext: '.jpg' },
+  'image/png':       { kind: 'image', ext: '.png' },
+  'image/gif':       { kind: 'image', ext: '.gif' },
+  'image/webp':      { kind: 'image', ext: '.webp' },
+  'application/pdf': { kind: 'pdf',   ext: '.pdf' },
+}
+const MAX_UPLOAD_MB = 20
 const storage = multer.diskStorage({
   destination: uploadsDir,
-  filename: (req, file, cb) => cb(null, `${uuid()}${path.extname(file.originalname)}`)
+  filename: (req, file, cb) => cb(null, `${uuid()}${ALLOWED_UPLOADS[file.mimetype]?.ext || ''}`)
 })
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } })
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_UPLOADS[file.mimetype]) return cb(null, true)
+    cb(new Error('Only images (JPEG, PNG, GIF, WebP) and PDF files can be attached'))
+  },
+})
 app.use('/uploads', express.static(uploadsDir))
 
 // --- DB ---
@@ -188,9 +206,15 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 // ── Image upload ─────────────────────────────────────────────────────────────
 
-app.post('/api/upload', requireAuth, upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
-  res.json({ url: `/uploads/${req.file.filename}` })
+app.post('/api/upload', requireAuth, (req, res) => {
+  upload.single('file')(req, res, err => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE' ? `File is too large (max ${MAX_UPLOAD_MB} MB)` : err.message
+      return res.status(400).json({ error: message })
+    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+    res.json({ url: `/uploads/${req.file.filename}`, kind: ALLOWED_UPLOADS[req.file.mimetype].kind, name: req.file.originalname })
+  })
 })
 
 // ── Exam routes (teacher-scoped) ─────────────────────────────────────────────

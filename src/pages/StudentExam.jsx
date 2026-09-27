@@ -355,6 +355,16 @@ export default function StudentExam() {
             <p className={styles.qNum}>Question {idx + 1}</p>
             <p className={styles.qText}>{q.text}</p>
             {q.image && <img src={q.image} alt="Question" className={styles.qImage} />}
+            {q.pdf && (
+              <div className={styles.pdfWrap}>
+                <div className={styles.pdfLabel}>📄 {q.pdf.name || 'Attached document'}</div>
+                <iframe
+                  src={`${q.pdf.url}#toolbar=0&navpanes=0`}
+                  title={q.pdf.name || 'Attached document'}
+                  className={styles.pdfFrame}
+                />
+              </div>
+            )}
 
             {q.type === 'multiple_choice' && (
               <div className={styles.options}>

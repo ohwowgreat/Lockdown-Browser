@@ -257,6 +257,29 @@
   object-fit: contain;
 }
 
+/* Attached PDF. Fixed height, and the student can drag it taller. */
+.pdfWrap {
+  display: flex;
+  flex-direction: column;
+  height: 480px;
+  min-height: 240px;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  resize: vertical;
+}
+
+.pdfLabel {
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 0.375rem 0.75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.pdfFrame { flex: 1; width: 100%; border: 0; background: #fff; }
+
 .drawingWrap { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
 
 .drawingToolbar {

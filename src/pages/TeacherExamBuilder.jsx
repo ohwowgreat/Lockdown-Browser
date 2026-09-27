@@ -18,48 +18,65 @@ const CALC_OPTIONS = [
 ]
 
 function emptyQuestion() {
-  return { id: uuid(), type: 'multiple_choice', text: '', options: ['', '', '', ''], correct: 0, image: null, calculator: 'none' }
+  return { id: uuid(), type: 'multiple_choice', text: '', options: ['', '', '', ''], correct: 0, image: null, pdf: null, calculator: 'none' }
 }
 
-function ImageUpload({ value, onChange, authHeaders }) {
+// One attachment per question: an image shown inline, or a PDF the student
+// reads in a frame. Uploading a new file replaces whatever was there.
+function AttachmentUpload({ image, pdf, onChange, authHeaders }) {
   const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
   const inputRef = useRef()
 
   async function handleFile(e) {
     const file = e.target.files[0]
+    e.target.value = ''
     if (!file) return
     setUploading(true)
+    setError('')
     const fd = new FormData()
-    fd.append('image', file)
-    const res = await fetch('/api/upload', { method: 'POST', headers: authHeaders(), body: fd })
-    const data = await res.json()
-    setUploading(false)
-    if (data.url) onChange(data.url)
+    fd.append('file', file)
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', headers: authHeaders(), body: fd })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      if (data.kind === 'pdf') onChange({ image: null, pdf: { url: data.url, name: data.name } })
+      else onChange({ image: data.url, pdf: null })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUploading(false)
+    }
   }
 
+  const small = { padding: '0.25rem 0.5rem', fontSize: '0.75rem' }
   return (
     <div className={styles.imageUpload}>
-      {value
-        ? (
-          <div className={styles.imagePreview}>
-            <img src={value} alt="Question image" />
-            <button className="btn-danger" onClick={() => onChange(null)} style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-              Remove
-            </button>
-          </div>
-        )
-        : (
-          <button
-            className="btn-ghost"
-            onClick={() => inputRef.current.click()}
-            disabled={uploading}
-            style={{ fontSize: '0.8125rem' }}
-          >
-            {uploading ? 'Uploading...' : '+ Add Image'}
-          </button>
-        )
-      }
-      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+      {image && (
+        <div className={styles.imagePreview}>
+          <img src={image} alt="Question image" />
+          <button className="btn-danger" onClick={() => onChange({ image: null, pdf: null })} style={small}>Remove</button>
+        </div>
+      )}
+      {pdf && (
+        <div className={styles.pdfChip}>
+          <span>📄 {pdf.name || 'Attached PDF'}</span>
+          <a href={pdf.url} target="_blank" rel="noreferrer" className="btn-ghost" style={{ ...small, textDecoration: 'none' }}>Open</a>
+          <button className="btn-danger" onClick={() => onChange({ image: null, pdf: null })} style={small}>Remove</button>
+        </div>
+      )}
+      {!image && !pdf && (
+        <button
+          className="btn-ghost"
+          onClick={() => inputRef.current.click()}
+          disabled={uploading}
+          style={{ fontSize: '0.8125rem' }}
+        >
+          {uploading ? 'Uploading...' : '+ Add Image or PDF'}
+        </button>
+      )}
+      {error && <p className={styles.hint} style={{ color: 'var(--danger)' }}>{error}</p>}
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={handleFile} style={{ display: 'none' }} />
     </div>
   )
 }
@@ -270,9 +287,10 @@ export default function TeacherExamBuilder() {
               <textarea rows={2} value={q.text} onChange={e => updateQuestion(q.id, { text: e.target.value })} placeholder="Enter your question..." />
             </div>
 
-            <ImageUpload
-              value={q.image}
-              onChange={url => updateQuestion(q.id, { image: url })}
+            <AttachmentUpload
+              image={q.image}
+              pdf={q.pdf}
+              onChange={patch => updateQuestion(q.id, patch)}
               authHeaders={authHeaders}
             />
 

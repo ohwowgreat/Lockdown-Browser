@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { ROOT, startServer, checker, api, registerTeacher, createOpenExam, loadPlaywright } from './lib.mjs'
+import { ROOT, startServer, checker, api, registerTeacher, createOpenExam, loadPlaywright, MC, SHORT } from './lib.mjs'
 
 const pw = loadPlaywright()
 if (!pw) {
@@ -26,7 +26,13 @@ const hidden  = (loc, ms = 10000) => loc.waitFor({ state: 'hidden',  timeout: ms
 const browser = await pw.chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
 try {
   const token = await registerTeacher(a, 'e2e@x.com')
-  const { id, code, session_id: SID } = await createOpenExam(a, token, { title: 'Browser Exam' })
+  const fd = new FormData()
+  fd.append('file', new Blob(['%PDF-1.4\n%%EOF'], { type: 'application/pdf' }), 'reading.pdf')
+  const uploaded = await (await a.raw('/api/upload', { method: 'POST', body: fd }, token)).json()
+  const { id, code, session_id: SID } = await createOpenExam(a, token, {
+    title: 'Browser Exam',
+    questions: [MC('q1', '2+2?', ['3', '4'], 1), { ...SHORT('q2', 'Summarize the reading'), pdf: { url: uploaded.url, name: uploaded.name } }],
+  })
   await a.post('/api/submissions', { session_id: SID, student_name: 'Grace', answers: { q1: 1 }, violations: 0 })
 
   // Teacher and student get separate browser contexts, like two machines.
@@ -67,6 +73,7 @@ try {
   }
 
   t.section('Live feed: join, pause, resume')
+  const linusRow = monitor.locator('[class*="studentRow"]', { hasText: 'Linus' })
   t.check('monitor shows Linus joining live', await visible(monitor.locator('[class*="studentName"]', { hasText: 'Linus' })))
   t.check('activity log records the join', await visible(monitor.getByText('Linus joined')))
   t.check('monitor was not denied', (await monitor.getByText('not authorized').count()) === 0)
@@ -78,6 +85,19 @@ try {
   await monitor.getByRole('button', { name: 'Resume' }).click()
   t.check('student overlay clears on resume', await hidden(student.getByText(/paused by your teacher/)))
 
+  t.section('PDF attachment')
+  t.check('student sees the attached document', await visible(student.getByText(/reading\.pdf/)))
+  const frame = student.locator('iframe[title="reading.pdf"]')
+  t.check('document frame present with the viewer toolbar hidden', /toolbar=0/.test((await frame.getAttribute('src')) || ''))
+  // Focus moving into the frame blurs the window. That must not count as leaving.
+  await student.evaluate(() => {
+    document.querySelector('iframe[title="reading.pdf"]').focus()
+    window.dispatchEvent(new Event('blur'))
+  })
+  await student.waitForTimeout(3200)
+  t.check('focusing the document is not an exit', (await monitor.getByText(/Linus briefly left/).count()) === 0 && (await linusRow.getByText(/violation/).count()) === 0)
+  await student.evaluate(() => { document.activeElement?.blur?.(); window.dispatchEvent(new Event('focus')) })
+
   t.section('Brief exits: logged, and a burst becomes one violation')
   // Leave and return inside the grace window, three times. Synthetic blur and
   // focus go through the same handlers as a real window switch.
@@ -86,7 +106,6 @@ try {
     await new Promise(r => setTimeout(r, 150))
     window.dispatchEvent(new Event('focus'))
   })
-  const linusRow = monitor.locator('[class*="studentRow"]', { hasText: 'Linus' })
   await flicker()
   t.check('first brief exit reaches the monitor log', await visible(monitor.getByText(/Linus briefly left the exam/).first()))
   t.check('one brief exit, no violation yet', await visible(linusRow.getByText(/1 brief exit/)) && (await linusRow.getByText(/violation/).count()) === 0)

@@ -156,6 +156,18 @@
   gap: 0.75rem;
 }
 
+.pdfChip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: fit-content;
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
 .imagePreview img {
   max-height: 160px;
   max-width: 100%;
