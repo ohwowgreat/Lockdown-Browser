@@ -131,7 +131,7 @@ export default function TeacherMonitor() {
   const nav = useNavigate()
   const { id: examId } = useParams()
   const [params] = useSearchParams()
-  const { authHeaders } = useAuth()
+  const { authHeaders, getToken } = useAuth()
 
   const [exam, setExam] = useState(null)
   const [sid, setSid] = useState(null)          // resolved session id
@@ -205,14 +205,20 @@ export default function TeacherMonitor() {
     const socket = io()
     socketRef.current = socket
 
+    // The live feed is teacher-only: the server checks this token and that the
+    // session's exam belongs to this teacher before letting the socket in.
     function joinRoom() {
-      socket.emit('join_session', { session_id: sid })
+      socket.emit('join_session', { session_id: sid, token: getToken() })
     }
 
     // Re-join the room on every (re)connect and reload data in case we missed events
     socket.on('connect', () => {
       joinRoom()
       loadData()
+    })
+
+    socket.on('join_denied', () => {
+      addLog('Live updates unavailable: not authorized for this session', 'warn')
     })
 
     socket.on('student_joined', ({ student_name, ip }) => {

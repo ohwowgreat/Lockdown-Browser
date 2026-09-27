@@ -8,13 +8,20 @@ import { fileURLToPath } from 'url'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import fs from 'fs'
-import { signToken, requireAuth, requireAdmin } from './auth.js'
+import { signToken, verifyToken, requireAuth, requireAdmin } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 app.set('trust proxy', true)  // so req.ip reflects X-Forwarded-For behind a proxy
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
+
+// Socket rooms. Students share one room per session and only ever receive
+// pause_state from it. Everything the monitor shows (joins, violations, notes,
+// keystrokes, submissions) goes to a teacher-only room, which a socket may
+// join only with a valid teacher token for an exam that teacher owns.
+const studentRoom = id => `session:${id}`
+const teacherRoom = id => `session:${id}:teachers`
 
 app.use(express.json({ limit: '10mb' }))
 
@@ -243,21 +250,25 @@ app.post('/api/submissions', (req, res) => {
   db.prepare('INSERT INTO submissions (id, session_id, student_name, answers, violations, ip) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, session_id, student_name, JSON.stringify(answers), violations || 0, ip)
   logEvent(session_id, student_name, 'submitted')
-  io.to(`session:${session_id}`).emit('submission', { id, student_name, violations, answers, ip, submitted_at: Date.now() })
+  io.to(teacherRoom(session_id)).emit('submission', { id, student_name, violations, answers, ip, submitted_at: Date.now() })
   res.json({ id })
 })
 
 // ── Session / results routes (teacher-scoped via session→exam→teacher) ────────
 
+// The session row for a session id, but only if its exam belongs to the given
+// teacher. Shared by the HTTP middleware below and the socket monitor join.
+const selectOwnedSession = db.prepare(`
+  SELECT s.* FROM sessions s
+  JOIN exams e ON e.id = s.exam_id
+  WHERE s.id = ? AND e.teacher_id = ?
+`)
+
 // Resolves :id to a session and checks it belongs to an exam owned by the
 // requesting teacher. A missing session, another teacher's exam, or an exam
 // with no owner all answer 404, so the id's existence is never confirmed.
 function requireSessionOwner(req, res, next) {
-  const session = db.prepare(`
-    SELECT s.* FROM sessions s
-    JOIN exams e ON e.id = s.exam_id
-    WHERE s.id = ? AND e.teacher_id = ?
-  `).get(req.params.id, req.teacher.id)
+  const session = selectOwnedSession.get(req.params.id, req.teacher.id)
   if (!session) return res.status(404).json({ error: 'Not found' })
   req.examSession = session
   next()
@@ -397,47 +408,61 @@ app.get('/api/admin/teachers/:id/exams', requireAdmin, (req, res) => {
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
-  socket.on('join_session', ({ session_id }) => socket.join(`session:${session_id}`))
+  // Teacher monitor joining a session's live feed. Needs the teacher's JWT and
+  // ownership of the session's exam; otherwise the socket joins nothing.
+  socket.on('join_session', ({ session_id, token } = {}) => {
+    let teacher = null
+    try { teacher = token ? verifyToken(token) : null } catch { teacher = null }
+    const session = teacher && session_id ? selectOwnedSession.get(session_id, teacher.id) : null
+    if (!session) {
+      socket.emit('join_denied', { session_id })
+      return
+    }
+    socket.join(teacherRoom(session_id))
+  })
 
   socket.on('student_join', ({ session_id, student_name }) => {
-    socket.join(`session:${session_id}`)
+    socket.join(studentRoom(session_id))
     socket.data.session_id = session_id
     socket.data.student_name = student_name
     const ip = socketIp(socket)
     logEvent(session_id, student_name, 'joined', ip ? `IP ${ip}` : null)
-    io.to(`session:${session_id}`).emit('student_joined', { id: socket.id, student_name, ip, joined_at: Date.now() })
+    io.to(teacherRoom(session_id)).emit('student_joined', { id: socket.id, student_name, ip, joined_at: Date.now() })
   })
 
   socket.on('violation', ({ session_id, student_name, count }) => {
     logEvent(session_id, student_name, 'violation', `#${count} – switched away from exam`)
-    io.to(`session:${session_id}`).emit('student_violation', { student_name, count, at: Date.now() })
+    io.to(teacherRoom(session_id)).emit('student_violation', { student_name, count, at: Date.now() })
   })
 
   socket.on('note', ({ session_id, student_name, action }) => {
     logEvent(session_id, student_name, 'note', action)
-    io.to(`session:${session_id}`).emit('student_note', { student_name, action, at: Date.now() })
+    io.to(teacherRoom(session_id)).emit('student_note', { student_name, action, at: Date.now() })
   })
 
-  // Teacher pauses/resumes a specific student (e.g. bathroom break).
-  // Broadcast to the whole session room: the matching student suppresses
-  // violations, and the monitor reflects the paused state.
+  // Teacher pauses/resumes a specific student (e.g. bathroom break). Honoured
+  // only from a socket that has joined this session's teacher room. Sent to
+  // both rooms: the matching student suppresses violations, and the monitor
+  // reflects the paused state.
   socket.on('set_pause', ({ session_id, student_name, paused }) => {
+    if (!socket.rooms.has(teacherRoom(session_id))) return
     logEvent(session_id, student_name, paused ? 'paused' : 'resumed')
-    io.to(`session:${session_id}`).emit('pause_state', { student_name, paused: !!paused, at: Date.now() })
+    io.to(studentRoom(session_id)).to(teacherRoom(session_id))
+      .emit('pause_state', { student_name, paused: !!paused, at: Date.now() })
   })
 
   socket.on('keystrokes', ({ session_id, student_name, keys }) => {
     if (!keys?.length) return
     const detail = keys.map(k => k.key).join(', ')
     logEvent(session_id, student_name, 'keystrokes', detail)
-    io.to(`session:${session_id}`).emit('student_keystrokes', { student_name, keys, at: Date.now() })
+    io.to(teacherRoom(session_id)).emit('student_keystrokes', { student_name, keys, at: Date.now() })
   })
 
   socket.on('disconnect', () => {
     const { session_id, student_name } = socket.data
     if (session_id && student_name) {
       logEvent(session_id, student_name, 'disconnected')
-      io.to(`session:${session_id}`).emit('student_left', { student_name, at: Date.now() })
+      io.to(teacherRoom(session_id)).emit('student_left', { student_name, at: Date.now() })
     }
   })
 })

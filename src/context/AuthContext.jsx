@@ -33,8 +33,14 @@ export function AuthProvider({ children }) {
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
 
+  // Raw token, for transports that can't carry an Authorization header
+  // (the Socket.IO monitor join).
+  function getToken() {
+    return localStorage.getItem('token')
+  }
+
   return (
-    <AuthContext.Provider value={{ teacher, loading, login, logout, authHeaders }}>
+    <AuthContext.Provider value={{ teacher, loading, login, logout, authHeaders, getToken }}>
       {children}
     </AuthContext.Provider>
   )
