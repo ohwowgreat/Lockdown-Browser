@@ -28,6 +28,14 @@ Environment variables, all optional:
 
 Node 20.19 or newer is required.
 
+## Locked-down devices
+
+ExamLock can see what happens in its own tab, not what floats above the
+browser or sits on a second device. `docs/device-lockdown.md` lists the kiosk
+and single-app options per platform, what each one buys, what to allow through
+URL filters (the Desmos calculators load from `www.desmos.com`), and when a
+native client would be worth building.
+
 ## Tests
 
 ```bash
