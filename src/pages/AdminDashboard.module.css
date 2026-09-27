@@ -33,6 +33,14 @@
   letter-spacing: 0.08em;
 }
 
+/* The header is dark, so a ghost button there needs light text and border
+   or it shows as an empty outline. */
+.header .logoutBtn {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.header .logoutBtn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+
 .main {
   max-width: 1000px;
   margin: 0 auto;

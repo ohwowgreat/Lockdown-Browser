@@ -61,7 +61,7 @@ export default function AdminDashboard() {
           <span className={styles.logo}>ExamLock</span>
           <span className={styles.adminBadge}>Admin</span>
         </div>
-        <button className="btn-ghost" onClick={() => { logout(); nav('/') }}>Log out</button>
+        <button className={`btn-ghost ${styles.logoutBtn}`} onClick={() => { logout(); nav('/') }}>Log out</button>
       </header>
 
       <main className={styles.main}>
