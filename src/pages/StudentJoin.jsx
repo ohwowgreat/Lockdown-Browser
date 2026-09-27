@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import styles from './StudentJoin.module.css'
 
 export default function StudentJoin() {
   const nav = useNavigate()
-  const [code, setCode] = useState('')
+  const [params] = useSearchParams()
+  // A QR code or shared link carries the code, so the student only types a name.
+  const [code, setCode] = useState((params.get('code') || '').toUpperCase())
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)

@@ -97,6 +97,36 @@ try {
   t.check('sessions list marks the current one and counts submissions', sittings?.[0].is_current === true && sittings[1].is_current === false && sittings[1].submission_count === 1)
   t.check('sessions list is teacher-scoped', (await a.get(`/api/exams/${rot.id}/sessions`, T2)).status === 404)
 
+  t.section('Exam list summary and quick actions')
+  const { body: listed } = await a.get('/api/exams', T1)
+  const smoke = listed.find(e => e.id === id)
+  t.check('list carries a summary per exam', Boolean(smoke?.summary) && typeof smoke.summary.joined === 'number')
+  t.check('summary counts the submission', smoke?.summary.submitted === 1 && smoke.summary.sittings === 1, JSON.stringify(smoke?.summary))
+  t.check('list carries is_archived', smoke?.is_archived === 0)
+
+  const dup = await a.post(`/api/exams/${id}/duplicate`, undefined, T1)
+  t.check('duplicate returns a new id and code', dup.status === 200 && dup.body?.id && dup.body.id !== id && dup.body.code !== code, JSON.stringify(dup.body))
+  const { body: copy } = await a.get(`/api/exams/${dup.body.id}`, T1)
+  t.check('copy is closed, titled as a copy, same questions', copy?.is_active === 0 && copy.title === 'Smoke Exam (copy)' && copy.questions.length === 2)
+  t.check('copy has fresh question ids', copy?.questions.every(q => !['q1', 'q2'].includes(q.id)))
+  t.check('duplicate is teacher-scoped', (await a.post(`/api/exams/${id}/duplicate`, undefined, T2)).status === 404)
+
+  const recoded = await a.post(`/api/exams/${id}/code`, undefined, T1)
+  t.check('new code issued', recoded.status === 200 && /^[A-Z0-9]{6}$/.test(recoded.body?.code || '') && recoded.body.code !== code, JSON.stringify(recoded.body))
+  t.check('exam carries the new code', (await a.get(`/api/exams/${id}`, T1)).body?.code === recoded.body.code)
+  t.check('old code no longer joins', (await a.get(`/api/exams/code/${code}`)).status === 404)
+  t.check('new code joins', (await a.get(`/api/exams/code/${recoded.body.code}`)).status === 200)
+  t.check('recode is teacher-scoped', (await a.post(`/api/exams/${id}/code`, undefined, T2)).status === 404)
+
+  const arch = await a.patch(`/api/exams/${id}/archive`, { is_archived: true }, T1)
+  const archived = (await a.get(`/api/exams/${id}`, T1)).body
+  t.check('archiving an open exam closes it', arch.status === 200 && archived?.is_archived === 1 && archived.is_active === 0)
+  t.check('archived sitting got an end stamp', Boolean((await a.get(`/api/sessions/${SID}`, T1)).body?.ended_at))
+  t.check('archived exam cannot be opened', (await a.patch(`/api/exams/${id}/active`, { is_active: true }, T1)).status === 400)
+  await a.patch(`/api/exams/${id}/archive`, { is_archived: false }, T1)
+  t.check('unarchived exam opens again', (await a.patch(`/api/exams/${id}/active`, { is_active: true }, T1)).status === 200)
+  t.check('archive is teacher-scoped', (await a.patch(`/api/exams/${id}/archive`, { is_archived: true }, T2)).status === 404)
+
   t.section('Suspension takes effect immediately')
   const ADMIN_TOKEN = await loginAdmin(a)
   const { body: teachers } = await a.get('/api/admin/teachers', ADMIN_TOKEN)

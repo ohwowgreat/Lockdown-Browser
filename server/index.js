@@ -116,6 +116,7 @@ try { db.exec(`ALTER TABLE exams ADD COLUMN settings TEXT`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_admin INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE teachers ADD COLUMN is_suspended INTEGER DEFAULT 0`) } catch (_) {}
 try { db.exec(`ALTER TABLE submissions ADD COLUMN ip TEXT`) } catch (_) {}
+try { db.exec(`ALTER TABLE exams ADD COLUMN is_archived INTEGER DEFAULT 0`) } catch (_) {}
 // One submission per student per session. Best effort: on a legacy database
 // that already holds duplicates the index cannot be built, and the submission
 // handler below still refuses new duplicates.
@@ -170,6 +171,28 @@ function flagStudent(session_id, student_name, type, detail) {
 
 function generateCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
+}
+
+function uniqueCode() {
+  let code = generateCode()
+  while (db.prepare('SELECT id FROM exams WHERE code = ?').get(code)) code = generateCode()
+  return code
+}
+
+// Headline counts for the exam list: the current sitting's activity and how
+// many sittings the exam has had.
+const countJoined = db.prepare("SELECT COUNT(DISTINCT student_name) AS n FROM events WHERE session_id = ? AND type = 'joined'")
+const countSubmitted = db.prepare('SELECT COUNT(*) AS n FROM submissions WHERE session_id = ?')
+const countViolators = db.prepare("SELECT COUNT(DISTINCT student_name) AS n FROM events WHERE session_id = ? AND type = 'violation'")
+const countSittings = db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE exam_id = ?')
+function examSummary(e) {
+  const s = e.active_session_id
+  return {
+    joined: s ? countJoined.get(s).n : 0,
+    submitted: s ? countSubmitted.get(s).n : 0,
+    violators: s ? countViolators.get(s).n : 0,
+    sittings: countSittings.get(e.id).n,
+  }
 }
 
 // ── Auth routes ──────────────────────────────────────────────────────────────
@@ -232,14 +255,13 @@ function studentExam(e) {
 
 app.get('/api/exams', requireAuth, (req, res) => {
   const exams = db.prepare('SELECT * FROM exams WHERE teacher_id = ? ORDER BY created_at DESC').all(req.teacher.id)
-  res.json(exams.map(parseExam))
+  res.json(exams.map(e => ({ ...parseExam(e), summary: examSummary(e) })))
 })
 
 app.post('/api/exams', requireAuth, (req, res) => {
   const { title, questions, time_limit, settings } = req.body
   const id = uuid()
-  let code = generateCode()
-  while (db.prepare('SELECT id FROM exams WHERE code = ?').get(code)) code = generateCode()
+  const code = uniqueCode()
   const sessionId = uuid()
   db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, id, Date.now())
   db.prepare('INSERT INTO exams (id, teacher_id, title, questions, time_limit, code, active_session_id, settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
@@ -275,6 +297,7 @@ app.patch('/api/exams/:id/active', requireAuth, (req, res) => {
   const { is_active } = req.body
   const exam = db.prepare('SELECT * FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
   if (!exam) return res.status(404).json({ error: 'Not found' })
+  if (is_active && exam.is_archived) return res.status(400).json({ error: 'Unarchive the exam before opening it' })
   let sessionId = exam.active_session_id
   const opening = is_active && !exam.is_active
   const closing = !is_active && exam.is_active
@@ -295,6 +318,42 @@ app.patch('/api/exams/:id/active', requireAuth, (req, res) => {
   }
   db.prepare('UPDATE exams SET is_active = ? WHERE id = ?').run(is_active ? 1 : 0, exam.id)
   res.json({ ok: true, session_id: sessionId })
+})
+
+// A closed copy of the exam with its own code and fresh question ids.
+app.post('/api/exams/:id/duplicate', requireAuth, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
+  if (!exam) return res.status(404).json({ error: 'Not found' })
+  const id = uuid()
+  const code = uniqueCode()
+  const sessionId = uuid()
+  const questions = JSON.parse(exam.questions).map(q => ({ ...q, id: uuid() }))
+  db.prepare('INSERT INTO sessions (id, exam_id, started_at) VALUES (?, ?, ?)').run(sessionId, id, Date.now())
+  db.prepare('INSERT INTO exams (id, teacher_id, title, questions, time_limit, code, active_session_id, settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, req.teacher.id, `${exam.title} (copy)`, JSON.stringify(questions), exam.time_limit, code, sessionId, exam.settings || DEFAULT_SETTINGS)
+  res.json({ id, code })
+})
+
+// A new join code. Students already in keep working; new joins need it.
+app.post('/api/exams/:id/code', requireAuth, (req, res) => {
+  const exam = db.prepare('SELECT id FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
+  if (!exam) return res.status(404).json({ error: 'Not found' })
+  const code = uniqueCode()
+  db.prepare('UPDATE exams SET code = ? WHERE id = ?').run(code, exam.id)
+  res.json({ code })
+})
+
+// Archiving closes the exam and hides it from the main list; results stay.
+app.patch('/api/exams/:id/archive', requireAuth, (req, res) => {
+  const exam = db.prepare('SELECT * FROM exams WHERE id = ? AND teacher_id = ?').get(req.params.id, req.teacher.id)
+  if (!exam) return res.status(404).json({ error: 'Not found' })
+  const archiving = !!req.body.is_archived
+  if (archiving && exam.is_active) {
+    if (exam.active_session_id) db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(Date.now(), exam.active_session_id)
+    db.prepare('UPDATE exams SET is_active = 0 WHERE id = ?').run(exam.id)
+  }
+  db.prepare('UPDATE exams SET is_archived = ? WHERE id = ?').run(archiving ? 1 : 0, exam.id)
+  res.json({ ok: true, is_archived: archiving })
 })
 
 // Every sitting of an exam, newest first, with headline counts.
